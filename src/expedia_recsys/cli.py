@@ -6,8 +6,13 @@ from datetime import date
 from pathlib import Path
 
 from expedia_recsys.baseline import build_submission, validate_baseline
+from expedia_recsys.competition import (
+    build_competition_submission,
+    validate_competition_candidates,
+)
 from expedia_recsys.config import ProjectPaths, default_project_root
 from expedia_recsys.prepare import prepare_data
+from expedia_recsys.ranker import build_ranker_submission, train_and_validate_ranker
 
 
 def _iso_date(value: str) -> date:
@@ -17,10 +22,17 @@ def _iso_date(value: str) -> date:
         raise argparse.ArgumentTypeError("expected a date in YYYY-MM-DD format") from exc
 
 
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("expected a positive integer")
+    return parsed
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="expedia-recsys",
-        description="Stage 1 Expedia recommendation pipeline",
+        description="Expedia hotel-cluster recommendation pipeline",
     )
     parser.add_argument(
         "--root",
@@ -30,9 +42,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--threads",
-        type=int,
+        type=_positive_int,
         default=max(1, min(8, os.cpu_count() or 4)),
-        help="DuckDB worker threads",
+        help="DuckDB and model worker threads",
     )
     parser.add_argument(
         "--memory-limit",
@@ -43,22 +55,91 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("prepare", help="convert Kaggle CSV files to typed Parquet")
 
-    validate = subparsers.add_parser("validate", help="run temporal validation and MAP@5")
+    validate = subparsers.add_parser("validate", help="run stage-1 temporal validation")
     validate.add_argument(
         "--cutoff",
         type=_iso_date,
         default=date(2014, 8, 1),
-        help="validation starts at this date; default: 2014-08-01",
+        help="validation starts at this date",
+    )
+    subparsers.add_parser("submit", help="build the stage-1 heuristic submission")
+
+    competition_validate = subparsers.add_parser(
+        "competition-validate",
+        help="validate the 12-source competition candidate generator",
+    )
+    competition_validate.add_argument(
+        "--cutoff",
+        type=_iso_date,
+        default=date(2014, 8, 1),
+    )
+    competition_validate.add_argument(
+        "--batch-size",
+        type=_positive_int,
+        default=25_000,
     )
 
-    subparsers.add_parser("submit", help="train on all history and build test submission")
+    competition_submit = subparsers.add_parser(
+        "competition-submit",
+        help="build the 12-source weighted heuristic submission",
+    )
+    competition_submit.add_argument(
+        "--batch-size",
+        type=_positive_int,
+        default=25_000,
+    )
 
-    all_command = subparsers.add_parser("all", help="prepare, validate, and build submission")
+    ranker_validate = subparsers.add_parser(
+        "ranker-validate",
+        help="train LightGBM LambdaRank and evaluate the complete temporal holdout",
+    )
+    ranker_validate.add_argument(
+        "--train-start",
+        type=_iso_date,
+        default=date(2014, 5, 1),
+    )
+    ranker_validate.add_argument(
+        "--cutoff",
+        type=_iso_date,
+        default=date(2014, 8, 1),
+    )
+    ranker_validate.add_argument(
+        "--max-train-queries",
+        type=_positive_int,
+        default=100_000,
+    )
+    ranker_validate.add_argument(
+        "--max-eval-queries",
+        type=_positive_int,
+        default=25_000,
+    )
+    ranker_validate.add_argument(
+        "--batch-size",
+        type=_positive_int,
+        default=25_000,
+    )
+
+    ranker_submit = subparsers.add_parser(
+        "ranker-submit",
+        help="score the Kaggle test set with the saved LambdaRank model",
+    )
+    ranker_submit.add_argument(
+        "--model",
+        type=Path,
+        default=None,
+        help="model file; default: artifacts/ranker_model.txt",
+    )
+    ranker_submit.add_argument(
+        "--batch-size",
+        type=_positive_int,
+        default=25_000,
+    )
+
+    all_command = subparsers.add_parser("all", help="prepare, validate, and build baseline")
     all_command.add_argument(
         "--cutoff",
         type=_iso_date,
         default=date(2014, 8, 1),
-        help="validation starts at this date; default: 2014-08-01",
     )
     return parser
 
@@ -66,14 +147,44 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _build_parser().parse_args()
     paths = ProjectPaths.from_root(args.root)
-
     common = {"threads": args.threads, "memory_limit": args.memory_limit}
+
     if args.command == "prepare":
         prepare_data(paths, **common)
     elif args.command == "validate":
         validate_baseline(paths, cutoff=args.cutoff, **common)
     elif args.command == "submit":
         build_submission(paths, **common)
+    elif args.command == "competition-validate":
+        validate_competition_candidates(
+            paths,
+            cutoff=args.cutoff,
+            batch_size=args.batch_size,
+            **common,
+        )
+    elif args.command == "competition-submit":
+        build_competition_submission(
+            paths,
+            batch_size=args.batch_size,
+            **common,
+        )
+    elif args.command == "ranker-validate":
+        train_and_validate_ranker(
+            paths,
+            train_start=args.train_start,
+            validation_cutoff=args.cutoff,
+            max_train_queries=args.max_train_queries,
+            max_eval_queries=args.max_eval_queries,
+            batch_size=args.batch_size,
+            **common,
+        )
+    elif args.command == "ranker-submit":
+        build_ranker_submission(
+            paths,
+            model_path=args.model,
+            batch_size=args.batch_size,
+            **common,
+        )
     elif args.command == "all":
         prepare_data(paths, **common)
         validate_baseline(paths, cutoff=args.cutoff, **common)
