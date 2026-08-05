@@ -1,28 +1,29 @@
-# Expedia Hotel Recommendations — этап 1
+# Expedia Hotel Recommendations
 
-Первый воспроизводимый этап проекта:
+Воспроизводимый pipeline для Kaggle Expedia Hotel Recommendations:
 
-1. чтение исходных Kaggle CSV/CSV.GZ без загрузки всего датасета в pandas;
-2. нормализация типов и преобразование в Parquet через DuckDB;
-3. временная валидация: история до cutoff, бронирования после cutoff;
-4. MAP@5 и Recall@5;
-5. сильный частотный baseline из шести источников кандидатов;
-6. генерация `submission_stage1.csv`.
+- CSV → типизированный Parquet через DuckDB;
+- честная временная валидация;
+- MAP@5;
+- 12 источников кандидатов;
+- memory-safe пакетная обработка;
+- LightGBM LambdaRank для ранжирования 20 кандидатов;
+- генерация Kaggle submission.
 
-## Источники кандидатов
+## Зафиксированные результаты
 
-Приоритет кандидатов фиксирован:
+На временном holdout с `cutoff=2014-08-01`:
 
-1. страна + регион + город пользователя + hotel market + точное расстояние;
-2. город пользователя + точное расстояние;
-3. user + destination + hotel country + hotel market;
-4. destination + hotel country + hotel market;
-5. hotel country + hotel market;
-6. глобально популярные hotel cluster.
+| Модель | MAP@5 | Recall@20 |
+|---|---:|---:|
+| Stage-1 heuristic | 0.51258 | — |
+| 12-source candidate heuristic | 0.51136 | 0.89777 |
 
-Клики и бронирования имеют разные веса. Более свежие события получают больший вес.
+Первый Kaggle submission дал Public MAP@5 `0.50376` и Private MAP@5 `0.50008`.
 
-## 1. Установка
+Высокий Recall@20 означает, что правильный hotel cluster уже присутствует среди кандидатов почти в 90% запросов. LambdaRank обучается выбирать и правильно упорядочивать эти кандидаты.
+
+## Установка
 
 Требуется Python 3.11+ и `uv`.
 
@@ -30,23 +31,18 @@
 uv sync --group dev
 ```
 
-## 2. Данные
+## Данные
 
-Положите в `data/raw`:
+Файлы Kaggle размещаются в `data/raw` и не коммитятся:
 
 ```text
-train.csv или train.csv.gz
-test.csv или test.csv.gz
-destinations.csv или destinations.csv.gz
+train.csv
+test.csv
+destinations.csv
+sample_submission.csv
 ```
 
-При настроенном Kaggle API можно использовать:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/download_data.ps1
-```
-
-## 3. Подготовка Parquet
+## Подготовка данных
 
 ```powershell
 uv run expedia-recsys --memory-limit 8GB prepare
@@ -60,55 +56,93 @@ data/processed/test.parquet
 data/processed/destinations.parquet
 ```
 
-## 4. Временная валидация
-
-По умолчанию история заканчивается 31 июля 2014 года, а validation начинается 1 августа 2014 года и содержит только бронирования.
+## Stage-1 baseline
 
 ```powershell
 uv run expedia-recsys --memory-limit 8GB validate --cutoff 2014-08-01
-```
-
-Результат:
-
-```text
-artifacts/validation_metrics.json
-artifacts/validation_predictions.csv
-```
-
-Основная метрика — `map_at_5`. Для одной правильной метки в строке она совпадает со средним reciprocal rank правильного hotel cluster в топ-5.
-
-## 5. Submission
-
-```powershell
 uv run expedia-recsys --memory-limit 8GB submit
 ```
 
+## Расширенный генератор кандидатов
+
+Используются:
+
+1. exact geo + distance;
+2. city + distance;
+3. user + destination + market;
+4. user + destination;
+5. destination + market;
+6. user + market;
+7. destination;
+8. destination + check-in month;
+9. market + check-in month;
+10. country + market;
+11. user history;
+12. global popularity.
+
+Проверка:
+
+```powershell
+uv run expedia-recsys --threads 4 --memory-limit 8GB competition-validate `
+    --cutoff 2014-08-01
+```
+
+## LambdaRank
+
+Команда строит признаки для пар `query × candidate`, обучает LightGBM LambdaRank, использует раннюю остановку на отдельном временном окне и затем считает MAP@5 на полном holdout.
+
+```powershell
+uv run expedia-recsys --threads 4 --memory-limit 8GB ranker-validate `
+    --train-start 2014-05-01 `
+    --cutoff 2014-08-01 `
+    --max-train-queries 100000 `
+    --max-eval-queries 25000
+```
+
+Артефакты:
+
+```text
+artifacts/ranker_model.txt
+artifacts/ranker_model_metadata.json
+artifacts/ranker_feature_importance.csv
+artifacts/ranker_validation_metrics.json
+artifacts/ranker_validation_predictions.csv
+```
+
+Для компьютера с ограниченной RAM начните с:
+
+```powershell
+uv run expedia-recsys --threads 4 --memory-limit 8GB ranker-validate `
+    --max-train-queries 50000 `
+    --max-eval-queries 15000
+```
+
+## Submission ranker-модели
+
+После успешной валидации:
+
+```powershell
+uv run expedia-recsys --threads 4 --memory-limit 8GB ranker-submit
+```
+
 Результат:
 
 ```text
-artifacts/submission_stage1.csv
+artifacts/submission_ranker.csv
 ```
 
-## 6. Полный запуск
+Отправка:
 
 ```powershell
-uv run expedia-recsys --memory-limit 8GB all --cutoff 2014-08-01
+uvx kaggle competitions submit expedia-hotel-recommendations `
+    -f artifacts/submission_ranker.csv `
+    -m "LightGBM LambdaRank 12-source candidates"
 ```
 
-Если в ноутбуке меньше 12–16 ГБ RAM, установите лимит `6GB`. DuckDB сможет использовать диск, но обработка займёт больше времени.
-
-## 7. Проверки
+## Проверки
 
 ```powershell
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
 ```
-
-## Что считается завершением этапа 1
-
-- исходные данные преобразуются одной командой;
-- validation не использует события из будущего;
-- получена зафиксированная MAP@5;
-- сформирован корректный CSV с пятью уникальными hotel cluster для каждой строки;
-- код проходит тесты и статический анализ.
