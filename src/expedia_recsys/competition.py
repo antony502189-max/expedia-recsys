@@ -3,10 +3,10 @@ from __future__ import annotations
 import csv
 import json
 import time
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from datetime import date
 from pathlib import Path
-from typing import Iterator
 
 from expedia_recsys.config import ProjectPaths
 from expedia_recsys.duck import connect, sql_path
