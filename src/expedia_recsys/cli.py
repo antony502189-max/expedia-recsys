@@ -12,7 +12,7 @@ from expedia_recsys.competition import (
 )
 from expedia_recsys.config import ProjectPaths, default_project_root
 from expedia_recsys.prepare import prepare_data
-from expedia_recsys.ranker import build_ranker_submission, train_and_validate_ranker
+from expedia_recsys.ranker_v2 import build_ranker_submission, train_and_validate_ranker
 
 
 def _iso_date(value: str) -> date:
@@ -91,12 +91,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     ranker_validate = subparsers.add_parser(
         "ranker-validate",
-        help="train LightGBM LambdaRank and evaluate the complete temporal holdout",
+        help="train the MAP@5-aligned blended ranker and score the temporal holdout",
     )
     ranker_validate.add_argument(
         "--train-start",
         type=_iso_date,
-        default=date(2014, 5, 1),
+        default=date(2014, 1, 1),
     )
     ranker_validate.add_argument(
         "--cutoff",
@@ -111,7 +111,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ranker_validate.add_argument(
         "--max-eval-queries",
         type=_positive_int,
-        default=25_000,
+        default=30_000,
     )
     ranker_validate.add_argument(
         "--batch-size",
@@ -121,7 +121,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     ranker_submit = subparsers.add_parser(
         "ranker-submit",
-        help="score the Kaggle test set with the saved LambdaRank model",
+        help="score the Kaggle test set with the saved blended ranker",
     )
     ranker_submit.add_argument(
         "--model",
