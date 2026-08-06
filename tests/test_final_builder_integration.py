@@ -4,9 +4,7 @@ import csv
 import json
 from pathlib import Path
 
-import pytest
-
-duckdb = pytest.importorskip("duckdb")
+import duckdb
 
 from expedia_analytics.config import AnalyticsPaths
 from expedia_analytics.contracts import DESTINATION_COLUMNS, TEST_COLUMNS, TRAIN_COLUMNS
