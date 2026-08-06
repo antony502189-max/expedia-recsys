@@ -10,8 +10,19 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 
 Write-Host "[overnight] project: $ProjectRoot"
-Write-Host "[overnight] pulling feature/geo-leak-max"
+$CurrentBranch = (git branch --show-current).Trim()
+if ($LASTEXITCODE -ne 0) {
+    throw "could not determine the current Git branch"
+}
+if ($CurrentBranch -ne "feature/geo-leak-max") {
+    Write-Host "[overnight] switching from $CurrentBranch to feature/geo-leak-max"
+    git switch feature/geo-leak-max
+    if ($LASTEXITCODE -ne 0) {
+        throw "git switch feature/geo-leak-max failed"
+    }
+}
 
+Write-Host "[overnight] pulling feature/geo-leak-max"
 git pull --ff-only
 if ($LASTEXITCODE -ne 0) {
     throw "git pull failed"
