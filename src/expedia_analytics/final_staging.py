@@ -40,7 +40,7 @@ def _create_typed_staging(
     accepted_name: str,
     quarantine_name: str,
     columns: tuple[ColumnSpec, ...],
-    extra_select: str = "",
+    business_key: str | None = None,
 ) -> None:
     fingerprint = _fingerprint_expr(columns)
     reasons = ", ".join(_reject_reason_expr(spec) for spec in columns)
@@ -48,6 +48,13 @@ def _create_typed_staging(
         f"{_typed_expr(spec)} AS \"{spec.name}\"" for spec in columns
     )
     raw_columns = ",\n".join(f'"{spec.name}" AS raw__{spec.name}' for spec in columns)
+    key_occurrence = (
+        f"ROW_NUMBER() OVER (PARTITION BY \"{business_key}\" "
+        "ORDER BY source_scan_ordinal)::BIGINT"
+        if business_key
+        else "1::BIGINT"
+    )
+    duplicate_reason = f"'{business_key}:duplicate_key'" if business_key else "NULL"
     con.execute(
         f"""
         CREATE TABLE staging._{source_name}_classified AS
@@ -56,10 +63,9 @@ def _create_typed_staging(
                 source_scan_ordinal,
                 filename AS source_file,
                 {fingerprint} AS raw_row_fingerprint,
-                CONCAT_WS(';', {reasons}) AS reject_reasons,
+                CONCAT_WS(';', {reasons}) AS base_reject_reasons,
                 {typed_columns},
                 {raw_columns}
-                {extra_select}
             FROM raw.{source_name}_landing
         ), multiplicity AS (
             SELECT
@@ -68,10 +74,18 @@ def _create_typed_staging(
                     AS duplicate_group_size,
                 ROW_NUMBER() OVER (
                     PARTITION BY raw_row_fingerprint ORDER BY source_scan_ordinal
-                )::BIGINT AS duplicate_occurrence
+                )::BIGINT AS duplicate_occurrence,
+                {key_occurrence} AS business_key_occurrence
             FROM classified
         )
-        SELECT * FROM multiplicity
+        SELECT
+            * EXCLUDE (base_reject_reasons),
+            CASE
+                WHEN base_reject_reasons <> '' THEN base_reject_reasons
+                WHEN business_key_occurrence > 1 THEN {duplicate_reason}
+                ELSE ''
+            END AS reject_reasons
+        FROM multiplicity
         """
     )
     typed_names = ", ".join(f'"{spec.name}"' for spec in columns)
@@ -85,7 +99,6 @@ def _create_typed_staging(
             duplicate_group_size,
             duplicate_occurrence,
             {typed_names}
-            {extra_select.replace(' AS ', ' AS ') if extra_select else ''}
         FROM staging._{source_name}_classified
         WHERE reject_reasons = ''
         """
@@ -93,7 +106,7 @@ def _create_typed_staging(
     con.execute(
         f"""
         CREATE TABLE staging.{quarantine_name} AS
-        SELECT * EXCLUDE ({typed_names})
+        SELECT * EXCLUDE ({typed_names}, business_key_occurrence)
         FROM staging._{source_name}_classified
         WHERE reject_reasons <> ''
         """
@@ -186,7 +199,12 @@ def _create_destinations_staging(con: Any) -> None:
                 ) AS destination_occurrence
             FROM staging._destinations_classified
         )
-        SELECT * EXCLUDE ({typed_names}, destination_occurrence)
+        SELECT
+            * EXCLUDE ({typed_names}, destination_occurrence, reject_reasons),
+            CASE
+                WHEN reject_reasons <> '' THEN reject_reasons
+                ELSE 'srch_destination_id:duplicate_key'
+            END AS reject_reasons
         FROM classified
         WHERE reject_reasons <> '' OR destination_occurrence > 1
         """
@@ -234,6 +252,7 @@ def _create_staging(con: Any) -> None:
         accepted_name="stg_test_accepted",
         quarantine_name="quarantine_test",
         columns=TEST_COLUMNS,
+        business_key="id",
     )
     _create_destinations_staging(con)
     con.execute(
