@@ -206,10 +206,10 @@ def _create_core(con: Any, contract: dict[str, Any]) -> None:
             CAST(DATE_TRUNC('month', event_date) AS DATE) AS event_month,
             EXTRACT(year FROM event_date)::SMALLINT AS event_year,
             EXTRACT(month FROM event_date)::TINYINT AS event_month_num,
-            COUNT(*)::BIGINT AS interaction_rows,
-            COUNT(*) FILTER (WHERE is_booking = 1)::BIGINT AS booking_rows,
+            SUM(interaction_rows)::BIGINT AS interaction_rows,
+            SUM(booking_rows)::BIGINT AS booking_rows,
             COUNT(DISTINCT srch_destination_id)::BIGINT AS distinct_destinations,
-            COUNT(DISTINCT proxy_context_id)::BIGINT AS proxy_contexts,
+            COUNT(*)::BIGINT AS proxy_contexts,
             BOOL_OR(has_booking) AS has_booking
         FROM analytics.fct_proxy_search_contexts
         GROUP BY user_id, event_date
