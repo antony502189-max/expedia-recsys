@@ -11,6 +11,28 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 
+function Get-GitChanges {
+    return @(git status --porcelain)
+}
+
+function Repair-GeneratedUvLock {
+    $Changes = @(Get-GitChanges)
+    if ($Changes.Count -eq 1 -and $Changes[0] -match 'uv\.lock$') {
+        Write-Host "[product-analytics] restoring generated uv.lock drift"
+        git restore --source=HEAD --staged --worktree -- uv.lock
+        if ($LASTEXITCODE -ne 0) { throw "failed to restore uv.lock" }
+    }
+}
+
+function Assert-CleanWorkingTree {
+    $Changes = @(Get-GitChanges)
+    if ($Changes.Count -gt 0) {
+        Write-Host "[product-analytics] dirty working tree:" -ForegroundColor Red
+        $Changes | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+        throw "working tree must be clean before validation or build"
+    }
+}
+
 try {
     $ComputerSystem = Get-CimInstance Win32_ComputerSystem
     $LogicalProcessors = [int]$ComputerSystem.NumberOfLogicalProcessors
@@ -42,34 +64,36 @@ Write-Host "[product-analytics] physical memory: ${TotalMemoryGB}GB"
 Write-Host "[product-analytics] DuckDB threads: $Threads"
 Write-Host "[product-analytics] DuckDB memory limit: $MemoryLimit"
 
-$GitChanges = @(git status --porcelain)
-if ($GitChanges.Count -gt 0) {
-    Write-Host "[product-analytics] dirty working tree:" -ForegroundColor Red
-    $GitChanges | ForEach-Object { Write-Host $_ -ForegroundColor Red }
-    throw "working tree must be clean before validation or build"
-}
+Repair-GeneratedUvLock
+Assert-CleanWorkingTree
 
 Write-Host "[product-analytics] syncing locked environment"
 uv sync --frozen --group dev
 if ($LASTEXITCODE -ne 0) { throw "uv sync failed" }
 
 Write-Host "[product-analytics] static checks"
-uv run ruff check .
+uv run --frozen ruff check .
 if ($LASTEXITCODE -ne 0) { throw "ruff failed" }
 
 if (-not $SkipTests) {
-    uv run pytest
+    uv run --frozen pytest
     if ($LASTEXITCODE -ne 0) { throw "pytest failed" }
 }
 
+Repair-GeneratedUvLock
+Assert-CleanWorkingTree
+
 if ($ResumeLatest) {
     Write-Host "[product-analytics] resuming latest successful build"
-    uv run expedia-analytics validate-final
+    uv run --frozen expedia-analytics validate-final
     if ($LASTEXITCODE -ne 0) { throw "final analytics validation failed" }
 
     Write-Host "[product-analytics] object registry"
-    uv run expedia-analytics inspect-final
+    uv run --frozen expedia-analytics inspect-final
     if ($LASTEXITCODE -ne 0) { throw "final analytics inspection failed" }
+
+    Repair-GeneratedUvLock
+    Assert-CleanWorkingTree
 
     $Latest = Get-Content ".\data\analytics\LATEST_BUILD.json" | ConvertFrom-Json
     Write-Host "[product-analytics] completed without rebuilding"
@@ -84,7 +108,7 @@ if (-not $SkipLegacyReconciliation) {
     if ((Test-Path ".\data\processed\train.parquet") -and
         (Test-Path ".\data\processed\destinations.parquet")) {
         Write-Host "[product-analytics] reconciling legacy prepared sources"
-        uv run expedia-analytics --threads $Threads --memory-limit $MemoryLimit reconcile-sources
+        uv run --frozen expedia-analytics --threads $Threads --memory-limit $MemoryLimit reconcile-sources
         if ($LASTEXITCODE -ne 0) { throw "legacy source reconciliation failed" }
     } else {
         Write-Host "[product-analytics] legacy Parquet is absent; final build uses raw CSV directly"
@@ -95,24 +119,30 @@ if (-not $SkipProfile) {
     if ((Test-Path ".\data\processed\train.parquet") -and
         (Test-Path ".\data\processed\destinations.parquet")) {
         Write-Host "[product-analytics] deep source profile"
-        uv run expedia-analytics --threads $Threads --memory-limit $MemoryLimit profile --deep
+        uv run --frozen expedia-analytics --threads $Threads --memory-limit $MemoryLimit profile --deep
         if ($LASTEXITCODE -ne 0) { throw "source profile failed" }
     }
 }
 
+Repair-GeneratedUvLock
+Assert-CleanWorkingTree
+
 $BuildId = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
 Write-Host "[product-analytics] immutable final build: $BuildId"
-uv run expedia-analytics --threads $Threads --memory-limit $MemoryLimit `
+uv run --frozen expedia-analytics --threads $Threads --memory-limit $MemoryLimit `
     build-final --build-id $BuildId
 if ($LASTEXITCODE -ne 0) { throw "final analytics build failed" }
 
 Write-Host "[product-analytics] validating latest build"
-uv run expedia-analytics validate-final
+uv run --frozen expedia-analytics validate-final
 if ($LASTEXITCODE -ne 0) { throw "final analytics validation failed" }
 
 Write-Host "[product-analytics] object registry"
-uv run expedia-analytics inspect-final
+uv run --frozen expedia-analytics inspect-final
 if ($LASTEXITCODE -ne 0) { throw "final analytics inspection failed" }
+
+Repair-GeneratedUvLock
+Assert-CleanWorkingTree
 
 Write-Host "[product-analytics] completed"
 Write-Host "[product-analytics] build id: $BuildId"
