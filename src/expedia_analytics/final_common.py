@@ -73,6 +73,7 @@ def _load_contract(paths: AnalyticsPaths) -> dict[str, Any]:
         "quality_thresholds",
         "published_metric_names",
         "prohibited_claims",
+        "full_dataset_minimums",
     }
     missing = sorted(required - payload.keys())
     if missing:
@@ -98,10 +99,14 @@ def _typed_expr(spec: ColumnSpec) -> str:
 
 def _fingerprint_expr(columns: Iterable[ColumnSpec]) -> str:
     parts = [
-        f'''COALESCE(REPLACE(CAST("{spec.name}" AS VARCHAR), '|~|', '|~~|'), '<NULL>')'''
+        f'''CASE
+            WHEN "{spec.name}" IS NULL THEN '-1:'
+            ELSE LENGTH(CAST("{spec.name}" AS VARCHAR))::VARCHAR
+                 || ':' || CAST("{spec.name}" AS VARCHAR)
+        END'''
         for spec in columns
     ]
-    return "SHA256(CONCAT_WS('|~|', " + ", ".join(parts) + "))"
+    return "SHA256(CONCAT(" + ", ".join(parts) + "))"
 
 
 def _reject_reason_expr(spec: ColumnSpec) -> str:
