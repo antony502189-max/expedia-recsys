@@ -11,8 +11,8 @@ Set-Location $ProjectRoot
 
 Write-Host "[product-analytics] project: $ProjectRoot"
 Write-Host "[product-analytics] branch: $(git branch --show-current)"
-Write-Host "[product-analytics] syncing environment"
-uv sync --group dev
+Write-Host "[product-analytics] syncing locked environment"
+uv sync --frozen --group dev
 if ($LASTEXITCODE -ne 0) { throw "uv sync failed" }
 
 Write-Host "[product-analytics] static checks"
