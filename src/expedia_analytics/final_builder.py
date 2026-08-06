@@ -22,6 +22,13 @@ from expedia_analytics.final_common import (
 )
 from expedia_analytics.final_core import _create_core, _create_dimensions
 from expedia_analytics.final_marts import _create_marts
+from expedia_analytics.final_semantic_dates import (
+    _apply_trip_date_semantics,
+    _extend_data_quality_summary,
+    _replace_date_dimension,
+    _replace_trip_segment_definitions,
+    _semantic_date_quality_gates,
+)
 from expedia_analytics.final_staging import _create_raw_landings, _create_staging
 from expedia_analytics.final_validation import (
     _copy_table,
@@ -33,6 +40,18 @@ from expedia_analytics.final_validation import (
 
 class BuildValidationError(RuntimeError):
     pass
+
+
+def _merge_quality_checks(
+    quality: dict[str, Any], additional_checks: list[dict[str, Any]]
+) -> dict[str, Any]:
+    checks = [*quality["checks"], *additional_checks]
+    failures = [check for check in checks if not check["passed"]]
+    return {
+        "passed": not failures,
+        "checks": checks,
+        "failure_count": len(failures),
+    }
 
 
 def build_final_analytics(
@@ -74,9 +93,17 @@ def build_final_analytics(
         sources = _create_raw_landings(con, paths)
         _create_staging(con)
         _create_core(con, contract)
+        _apply_trip_date_semantics(con, contract)
         _create_dimensions(con)
+        _replace_date_dimension(con)
+        _replace_trip_segment_definitions(con, contract)
         _create_marts(con, contract)
+        _extend_data_quality_summary(con)
         quality = _quality_gates(con, contract)
+        quality = _merge_quality_checks(
+            quality,
+            _semantic_date_quality_gates(con, contract),
+        )
         if not quality["passed"]:
             failures = [item["name"] for item in quality["checks"] if not item["passed"]]
             raise BuildValidationError("Quality gates failed: " + ", ".join(failures))
@@ -187,6 +214,10 @@ def validate_latest(paths: AnalyticsPaths) -> dict[str, Any]:
     )
     try:
         quality = _quality_gates(con, contract)
+        quality = _merge_quality_checks(
+            quality,
+            _semantic_date_quality_gates(con, contract),
+        )
     finally:
         con.close()
     if not quality["passed"]:
