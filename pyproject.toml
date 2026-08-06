@@ -1,15 +1,16 @@
 [project]
 name = "expedia-recsys"
-version = "0.1.0"
-description = "Stage 1 pipeline for Expedia Hotel Recommendations"
+version = "0.2.0"
+description = "Reproducible product analytics and data marts for Expedia hotel logs"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "duckdb>=1.5.5,<2.0",
+    "duckdb>=1.3,<2.0",
 ]
 
 [project.scripts]
 expedia-recsys = "expedia_recsys.cli:main"
+expedia-analytics = "expedia_analytics.cli:main"
 
 [dependency-groups]
 dev = [
@@ -22,7 +23,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/expedia_recsys"]
+packages = ["src/expedia_recsys", "src/expedia_analytics"]
 
 [tool.ruff]
 line-length = 100
