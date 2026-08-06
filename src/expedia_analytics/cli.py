@@ -6,6 +6,7 @@ from pathlib import Path
 
 from expedia_analytics.builder import build_analytics, inspect_analytics, validate_analytics
 from expedia_analytics.config import AnalyticsPaths, default_project_root
+from expedia_analytics.profiler import profile_sources
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -21,6 +22,17 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--memory-limit", default="32GB")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    profile = subparsers.add_parser(
+        "profile",
+        help="profile source schema, nulls, distributions and semantic risks",
+    )
+    profile.add_argument(
+        "--deep",
+        action="store_true",
+        help="also scan duplicate hashes and strict proxy-search contexts",
+    )
+
     subparsers.add_parser("build", help="build facts, dimensions and marts")
     subparsers.add_parser("validate", help="run reconciliation and quality gates")
     subparsers.add_parser("inspect", help="print the mart registry")
@@ -30,7 +42,14 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _parser().parse_args()
     paths = AnalyticsPaths.from_root(args.root)
-    if args.command == "build":
+    if args.command == "profile":
+        profile_sources(
+            paths,
+            threads=args.threads,
+            memory_limit=args.memory_limit,
+            deep=args.deep,
+        )
+    elif args.command == "build":
         build_analytics(
             paths,
             threads=args.threads,
