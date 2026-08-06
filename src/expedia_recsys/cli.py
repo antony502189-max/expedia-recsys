@@ -11,6 +11,7 @@ from expedia_recsys.competition import (
     validate_competition_candidates,
 )
 from expedia_recsys.config import ProjectPaths, default_project_root
+from expedia_recsys.geo_leak import validate_geo_leak
 from expedia_recsys.prepare import prepare_data
 from expedia_recsys.ranker_v2 import build_ranker_submission, train_and_validate_ranker
 
@@ -135,6 +136,27 @@ def _build_parser() -> argparse.ArgumentParser:
         default=25_000,
     )
 
+    geo_validate = subparsers.add_parser(
+        "geo-leak-validate",
+        help="validate exact and rounded-distance leak overlays on the champion ranker",
+    )
+    geo_validate.add_argument(
+        "--cutoff",
+        type=_iso_date,
+        default=date(2014, 8, 1),
+    )
+    geo_validate.add_argument(
+        "--champion",
+        type=Path,
+        default=None,
+        help="champion validation CSV; default: artifacts/ranker_validation_predictions.csv",
+    )
+    geo_validate.add_argument(
+        "--batch-size",
+        type=_positive_int,
+        default=25_000,
+    )
+
     all_command = subparsers.add_parser("all", help="prepare, validate, and build baseline")
     all_command.add_argument(
         "--cutoff",
@@ -182,6 +204,14 @@ def main() -> None:
         build_ranker_submission(
             paths,
             model_path=args.model,
+            batch_size=args.batch_size,
+            **common,
+        )
+    elif args.command == "geo-leak-validate":
+        validate_geo_leak(
+            paths,
+            cutoff=args.cutoff,
+            champion_path=args.champion,
             batch_size=args.batch_size,
             **common,
         )
