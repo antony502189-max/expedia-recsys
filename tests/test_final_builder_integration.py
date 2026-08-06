@@ -88,6 +88,7 @@ def _prepare_project(root: Path) -> AnalyticsPaths:
     paths.contract_path.parent.mkdir(parents=True, exist_ok=True)
     contract = json.loads(contract_source.read_text(encoding="utf-8"))
     contract["quality_thresholds"]["maximum_quarantine_rate"] = 0.5
+    contract["quality_thresholds"]["maximum_proxy_multimarket_rate"] = 1.0
     paths.contract_path.write_text(
         json.dumps(contract, ensure_ascii=False, indent=2), encoding="utf-8"
     )
