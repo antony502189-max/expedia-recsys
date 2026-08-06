@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from expedia_analytics.config import AnalyticsPaths
 from expedia_analytics.contracts import ColumnSpec
