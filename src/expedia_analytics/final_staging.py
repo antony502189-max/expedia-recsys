@@ -50,7 +50,8 @@ def _create_typed_staging(
     raw_columns = ",\n".join(f'"{spec.name}" AS raw__{spec.name}' for spec in columns)
     key_occurrence = (
         f"ROW_NUMBER() OVER (PARTITION BY \"{business_key}\" "
-        "ORDER BY source_scan_ordinal)::BIGINT"
+        "ORDER BY CASE WHEN base_reject_reasons = '' THEN 0 ELSE 1 END, "
+        "source_scan_ordinal)::BIGINT"
         if business_key
         else "1::BIGINT"
     )
@@ -195,7 +196,9 @@ def _create_destinations_staging(con: Any) -> None:
             SELECT
                 *,
                 ROW_NUMBER() OVER (
-                    PARTITION BY srch_destination_id ORDER BY source_scan_ordinal
+                    PARTITION BY srch_destination_id
+                    ORDER BY CASE WHEN reject_reasons = '' THEN 0 ELSE 1 END,
+                             source_scan_ordinal
                 ) AS destination_occurrence
             FROM staging._destinations_classified
         )
