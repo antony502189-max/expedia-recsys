@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from pathlib import Path
 
 from expedia_analytics.config import AnalyticsPaths, default_project_root
 from expedia_analytics.final_acceptance import evaluate_final_acceptance
 from expedia_analytics.final_builder import (
+    _json_dumps,
     build_final_analytics,
     compare_builds,
     inspect_latest,
@@ -101,20 +101,18 @@ def main() -> None:
             build_id=args.build_id,
         )
         print(
-            json.dumps(
+            _json_dumps(
                 {
                     "build_id": manifest["build_id"],
                     "objects": len(manifest["objects"]),
                     "quality_passed": manifest["quality"]["passed"],
                     "elapsed_seconds": manifest["elapsed_seconds"],
-                },
-                ensure_ascii=False,
-                indent=2,
+                }
             )
         )
     elif args.command == "validate-final":
         result = validate_latest(paths)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(_json_dumps(result))
     elif args.command == "inspect-final":
         for item in inspect_latest(paths):
             print(
@@ -128,7 +126,7 @@ def main() -> None:
             args.right_build,
             exact=args.exact,
         )
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(_json_dumps(result))
         if not result["identical_logical_checksums"]:
             raise SystemExit(1)
         if args.exact and not result["exact_identical"]:
@@ -140,7 +138,7 @@ def main() -> None:
             args.right_build,
             manual_verification_path=args.manual_verification,
         )
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(_json_dumps(result))
         if not result["passed"]:
             raise SystemExit(1)
     else:
