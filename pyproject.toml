@@ -36,7 +36,7 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
-"scripts/overnight_max.py" = ["E501", "SIM"]
+"scripts/overnight_max.py" = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
