@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from expedia_analytics.config import AnalyticsPaths
-from expedia_analytics.final_builder import compare_builds
+from expedia_analytics.final_builder import _json_dumps, compare_builds
 from expedia_analytics.final_common import _load_contract
 
 
@@ -217,5 +217,5 @@ def evaluate_final_acceptance(
     }
     output = paths.artifacts_dir / "FINAL_ACCEPTANCE.json"
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    output.write_text(_json_dumps(report), encoding="utf-8")
     return report
