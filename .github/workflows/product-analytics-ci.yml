@@ -30,10 +30,13 @@ jobs:
         run: uv sync --frozen --group dev
 
       - name: Ruff
-        run: uv run ruff check .
+        run: uv run --frozen ruff check .
 
       - name: Unit and synthetic integration tests
-        run: uv run pytest -q
+        run: uv run --frozen pytest -q
+
+      - name: Verify lockfile remains unchanged
+        run: git diff --exit-code -- uv.lock
 
       - name: Parse PowerShell launcher
         shell: pwsh
