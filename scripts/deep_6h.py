@@ -656,7 +656,17 @@ def main() -> int:
             selected_ensemble,
         )
         commands.extend(submission_commands)
-        restore_model(selected_single)
+        restorable_model = next(
+            (
+                item
+                for item in unique_models
+                if (item.directory / "ranker_model.txt").exists()
+                and (item.directory / "ranker_model_metadata.json").exists()
+            ),
+            None,
+        )
+        if restorable_model is not None:
+            restore_model(restorable_model)
 
         elapsed_hours = (time.monotonic() - started) / 3600
         summary = {
@@ -678,6 +688,7 @@ def main() -> int:
                 selected_single.prediction_evaluation_map
             ),
             "selected_ensemble": selected_ensemble,
+            "restored_ranker": restorable_model.name if restorable_model else None,
             "final_submission": str(final_path) if final_path else None,
             "submission_validation": submission_validation,
             "commands": [asdict(command) for command in commands],
