@@ -10,5 +10,9 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+data/analytics/*
+!data/analytics/.gitkeep
+data/marts/*
+!data/marts/.gitkeep
 artifacts/*
 !artifacts/.gitkeep
