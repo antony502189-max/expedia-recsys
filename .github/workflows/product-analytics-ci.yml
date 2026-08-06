@@ -34,3 +34,17 @@ jobs:
 
       - name: Unit and synthetic integration tests
         run: uv run pytest -q
+
+      - name: Parse PowerShell launcher
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "scripts/run_product_analytics.ps1"),
+            [ref]$null,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
