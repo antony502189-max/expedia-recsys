@@ -11,9 +11,57 @@ def _date_policy(contract: dict[str, Any]) -> tuple[int, int]:
     )
 
 
+def _classification_update_sql(max_lead: int, max_stay: int) -> str:
+    return f"""
+        SET
+            is_plausible_lead_time =
+                checkin_date IS NOT NULL AND lead_time_days BETWEEN 0 AND {max_lead},
+            is_plausible_stay_dates =
+                checkin_date IS NOT NULL
+                AND checkout_date IS NOT NULL
+                AND stay_nights BETWEEN 1 AND {max_stay},
+            is_plausible_trip_dates =
+                checkin_date IS NOT NULL
+                AND checkout_date IS NOT NULL
+                AND lead_time_days BETWEEN 0 AND {max_lead}
+                AND stay_nights BETWEEN 1 AND {max_stay},
+            lead_time_segment = CASE
+                WHEN checkin_date IS NULL THEN 'missing'
+                WHEN lead_time_days < 0 THEN 'invalid_negative'
+                WHEN lead_time_days > {max_lead} THEN 'out_of_scope_gt_{max_lead}'
+                WHEN lead_time_days = 0 THEN 'same_day'
+                WHEN lead_time_days <= 7 THEN '01_07_days'
+                WHEN lead_time_days <= 30 THEN '08_30_days'
+                WHEN lead_time_days <= 90 THEN '31_90_days'
+                WHEN lead_time_days <= 180 THEN '91_180_days'
+                ELSE '181_{max_lead}_days'
+            END,
+            stay_segment = CASE
+                WHEN checkin_date IS NULL OR checkout_date IS NULL THEN 'missing'
+                WHEN stay_nights <= 0 THEN 'invalid_nonpositive'
+                WHEN stay_nights > {max_stay} THEN 'out_of_scope_gt_{max_stay}'
+                WHEN stay_nights = 1 THEN '01_night'
+                WHEN stay_nights <= 3 THEN '02_03_nights'
+                WHEN stay_nights <= 7 THEN '04_07_nights'
+                WHEN stay_nights <= 14 THEN '08_14_nights'
+                ELSE '15_{max_stay}_nights'
+            END,
+            trip_date_quality = CASE
+                WHEN checkin_date IS NULL THEN 'missing_checkin'
+                WHEN lead_time_days < 0 THEN 'checkin_before_event'
+                WHEN lead_time_days > {max_lead} THEN 'lead_time_out_of_scope'
+                WHEN checkout_date IS NULL THEN 'missing_checkout'
+                WHEN stay_nights <= 0 THEN 'checkout_not_after_checkin'
+                WHEN stay_nights > {max_stay} THEN 'stay_out_of_scope'
+                ELSE 'plausible'
+            END
+    """
+
+
 def _apply_trip_date_semantics(con: Any, contract: dict[str, Any]) -> None:
     """Classify parse-valid trip dates without dropping source interactions."""
     max_lead, max_stay = _date_policy(contract)
+
     con.execute(
         """
         ALTER TABLE analytics.fct_hotel_interactions
@@ -33,60 +81,19 @@ def _apply_trip_date_semantics(con: Any, contract: dict[str, Any]) -> None:
     con.execute(
         f"""
         UPDATE analytics.fct_hotel_interactions
-        SET
+        {_classification_update_sql(max_lead, max_stay)},
             is_chronologically_valid_lead_time =
                 checkin_date IS NOT NULL AND lead_time_days >= 0,
             is_chronologically_valid_stay_dates =
                 checkin_date IS NOT NULL
                 AND checkout_date IS NOT NULL
                 AND stay_nights > 0,
-            is_plausible_lead_time =
-                checkin_date IS NOT NULL AND lead_time_days BETWEEN 0 AND {max_lead},
-            is_plausible_stay_dates =
-                checkin_date IS NOT NULL
-                AND checkout_date IS NOT NULL
-                AND stay_nights BETWEEN 1 AND {max_stay},
-            is_plausible_trip_dates =
-                checkin_date IS NOT NULL
-                AND checkout_date IS NOT NULL
-                AND lead_time_days BETWEEN 0 AND {max_lead}
-                AND stay_nights BETWEEN 1 AND {max_stay},
             has_valid_lead_time =
                 checkin_date IS NOT NULL AND lead_time_days BETWEEN 0 AND {max_lead},
             has_valid_stay_dates =
                 checkin_date IS NOT NULL
                 AND checkout_date IS NOT NULL
-                AND stay_nights BETWEEN 1 AND {max_stay},
-            lead_time_segment = CASE
-                WHEN checkin_date IS NULL THEN 'missing'
-                WHEN lead_time_days < 0 THEN 'invalid_negative'
-                WHEN lead_time_days > {max_lead} THEN 'out_of_scope_gt_{max_lead}'
-                WHEN lead_time_days = 0 THEN 'same_day'
-                WHEN lead_time_days <= 7 THEN '01_07_days'
-                WHEN lead_time_days <= 30 THEN '08_30_days'
-                WHEN lead_time_days <= 90 THEN '31_90_days'
-                WHEN lead_time_days <= 180 THEN '91_180_days'
-                ELSE '181_{max_lead}_days'
-            END,
-            stay_segment = CASE
-                WHEN checkin_date IS NULL OR checkout_date IS NULL THEN 'missing'
-                WHEN stay_nights <= 0 THEN 'invalid_nonpositive'
-                WHEN stay_nights > {max_stay} THEN 'out_of_scope_gt_{max_stay}'
-                WHEN stay_nights = 1 THEN '01_night'
-                WHEN stay_nights <= 3 THEN '02_03_nights'
-                WHEN stay_nights <= 7 THEN '04_07_nights'
-                WHEN stay_nights <= 14 THEN '08_14_nights'
-                ELSE '15_{max_stay}_nights'
-            END,
-            trip_date_quality = CASE
-                WHEN checkin_date IS NULL THEN 'missing_checkin'
-                WHEN lead_time_days < 0 THEN 'checkin_before_event'
-                WHEN lead_time_days > {max_lead} THEN 'lead_time_out_of_scope'
-                WHEN checkout_date IS NULL THEN 'missing_checkout'
-                WHEN stay_nights <= 0 THEN 'checkout_not_after_checkin'
-                WHEN stay_nights > {max_stay} THEN 'stay_out_of_scope'
-                ELSE 'plausible'
-            END
+                AND stay_nights BETWEEN 1 AND {max_stay}
         """
     )
 
@@ -105,48 +112,7 @@ def _apply_trip_date_semantics(con: Any, contract: dict[str, Any]) -> None:
     con.execute(
         f"""
         UPDATE analytics.fct_proxy_search_contexts
-        SET
-            is_plausible_lead_time =
-                checkin_date IS NOT NULL AND lead_time_days BETWEEN 0 AND {max_lead},
-            is_plausible_stay_dates =
-                checkin_date IS NOT NULL
-                AND checkout_date IS NOT NULL
-                AND stay_nights BETWEEN 1 AND {max_stay},
-            is_plausible_trip_dates =
-                checkin_date IS NOT NULL
-                AND checkout_date IS NOT NULL
-                AND lead_time_days BETWEEN 0 AND {max_lead}
-                AND stay_nights BETWEEN 1 AND {max_stay},
-            lead_time_segment = CASE
-                WHEN checkin_date IS NULL THEN 'missing'
-                WHEN lead_time_days < 0 THEN 'invalid_negative'
-                WHEN lead_time_days > {max_lead} THEN 'out_of_scope_gt_{max_lead}'
-                WHEN lead_time_days = 0 THEN 'same_day'
-                WHEN lead_time_days <= 7 THEN '01_07_days'
-                WHEN lead_time_days <= 30 THEN '08_30_days'
-                WHEN lead_time_days <= 90 THEN '31_90_days'
-                WHEN lead_time_days <= 180 THEN '91_180_days'
-                ELSE '181_{max_lead}_days'
-            END,
-            stay_segment = CASE
-                WHEN checkin_date IS NULL OR checkout_date IS NULL THEN 'missing'
-                WHEN stay_nights <= 0 THEN 'invalid_nonpositive'
-                WHEN stay_nights > {max_stay} THEN 'out_of_scope_gt_{max_stay}'
-                WHEN stay_nights = 1 THEN '01_night'
-                WHEN stay_nights <= 3 THEN '02_03_nights'
-                WHEN stay_nights <= 7 THEN '04_07_nights'
-                WHEN stay_nights <= 14 THEN '08_14_nights'
-                ELSE '15_{max_stay}_nights'
-            END,
-            trip_date_quality = CASE
-                WHEN checkin_date IS NULL THEN 'missing_checkin'
-                WHEN lead_time_days < 0 THEN 'checkin_before_event'
-                WHEN lead_time_days > {max_lead} THEN 'lead_time_out_of_scope'
-                WHEN checkout_date IS NULL THEN 'missing_checkout'
-                WHEN stay_nights <= 0 THEN 'checkout_not_after_checkin'
-                WHEN stay_nights > {max_stay} THEN 'stay_out_of_scope'
-                ELSE 'plausible'
-            END
+        {_classification_update_sql(max_lead, max_stay)}
         """
     )
 
@@ -268,7 +234,6 @@ def _extend_data_quality_summary(con: Any) -> None:
 def _semantic_date_quality_gates(
     con: Any, contract: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    max_lead, max_stay = _date_policy(contract)
     checks: list[dict[str, Any]] = []
 
     def scalar(query: str) -> Any:
@@ -365,35 +330,50 @@ def _semantic_date_quality_gates(
         booking_window_rows == plausible_trips,
     )
 
-    leaked_extremes = int(
+    unjustified_role_flags = int(
         scalar(
-            f"""
-            SELECT COUNT(*)
-            FROM analytics.dim_date d
-            WHERE d.date_day IN (
-                SELECT checkin_date
-                FROM analytics.fct_hotel_interactions
-                WHERE lead_time_days > {max_lead}
-                UNION
-                SELECT checkout_date
-                FROM analytics.fct_hotel_interactions
-                WHERE stay_nights > {max_stay}
-                   OR lead_time_days > {max_lead}
+            """
+            WITH invalid_only_checkins AS (
+                SELECT DISTINCT invalid.checkin_date AS date_day
+                FROM analytics.fct_hotel_interactions invalid
+                WHERE invalid.checkin_date IS NOT NULL
+                  AND NOT invalid.is_plausible_lead_time
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM analytics.fct_hotel_interactions valid
+                      WHERE valid.checkin_date = invalid.checkin_date
+                        AND valid.is_plausible_lead_time
+                  )
+            ), invalid_only_checkouts AS (
+                SELECT DISTINCT invalid.checkout_date AS date_day
+                FROM analytics.fct_hotel_interactions invalid
+                WHERE invalid.checkout_date IS NOT NULL
+                  AND NOT invalid.is_plausible_trip_dates
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM analytics.fct_hotel_interactions valid
+                      WHERE valid.checkout_date = invalid.checkout_date
+                        AND valid.is_plausible_trip_dates
+                  )
+            ), violations AS (
+                SELECT d.date_day
+                FROM invalid_only_checkins invalid
+                JOIN analytics.dim_date d USING (date_day)
+                WHERE d.is_plausible_checkin_date
+                UNION ALL
+                SELECT d.date_day
+                FROM invalid_only_checkouts invalid
+                JOIN analytics.dim_date d USING (date_day)
+                WHERE d.is_plausible_checkout_date
             )
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM analytics.fct_hotel_interactions i
-                  WHERE i.event_date = d.date_day
-                     OR (i.checkin_date = d.date_day AND i.is_plausible_lead_time)
-                     OR (i.checkout_date = d.date_day AND i.is_plausible_trip_dates)
-              )
+            SELECT COUNT(*) FROM violations
             """
         )
     )
     add(
-        "out_of_scope_trip_dates_do_not_expand_date_spine",
-        leaked_extremes,
+        "out_of_scope_trip_dates_not_marked_as_plausible_roles",
+        unjustified_role_flags,
         0,
-        leaked_extremes == 0,
+        unjustified_role_flags == 0,
     )
     return checks
