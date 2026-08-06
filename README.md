@@ -1,38 +1,36 @@
-# Expedia Hotel Recommendations — этап 1
+# Expedia Product Analytics
 
-Первый воспроизводимый этап проекта:
+Проект строит воспроизводимый аналитический слой на полном датасете Expedia Hotel Recommendations: типизированные данные, факт-таблицы, измерения, dashboard-ready витрины, контроль качества и manifest сборки.
 
-1. чтение исходных Kaggle CSV/CSV.GZ без загрузки всего датасета в pandas;
-2. нормализация типов и преобразование в Parquet через DuckDB;
-3. временная валидация: история до cutoff, бронирования после cutoff;
-4. MAP@5 и Recall@5;
-5. сильный частотный baseline из шести источников кандидатов;
-6. генерация `submission_stage1.csv`.
+## Цель текущего этапа
 
-## Источники кандидатов
+Реализован первый итоговый артефакт проекта:
 
-Приоритет кандидатов фиксирован:
+1. структура витрин и документированная логика их сборки;
+2. физические DuckDB-таблицы и Parquet-файлы под будущий дашборд и аналитические выводы;
+3. единый словарь метрик;
+4. data-quality слой и автоматические reconciliation checks.
 
-1. страна + регион + город пользователя + hotel market + точное расстояние;
-2. город пользователя + точное расстояние;
-3. user + destination + hotel country + hotel market;
-4. destination + hotel country + hotel market;
-5. hotel country + hotel market;
-6. глобально популярные hotel cluster.
+ML-модели, Kaggle submissions и MAP@5 не являются целью этой ветки.
 
-Клики и бронирования имеют разные веса. Более свежие события получают больший вес.
+## Архитектура
 
-## 1. Установка
-
-Требуется Python 3.11+ и `uv`.
-
-```powershell
-uv sync --group dev
+```text
+data/raw/*.csv
+    -> data/processed/*.parquet
+    -> analytics.fct_hotel_interactions
+    -> analytics.fct_search_contexts
+    -> analytics.dim_*
+    -> analytics.dm_*
+    -> data/analytics/expedia_analytics.duckdb
+    -> data/marts/*.parquet
 ```
 
-## 2. Данные
+Главное ограничение источника: отсутствуют `session_id` и `search_request_id`. Поэтому `fct_search_contexts` использует детерминированный proxy поискового контекста. Это явно отражено в названиях метрик и документации.
 
-Положите в `data/raw`:
+## Подготовка источников
+
+Требуются Python 3.11+, `uv` и исходные файлы в `data/raw`:
 
 ```text
 train.csv или train.csv.gz
@@ -40,75 +38,62 @@ test.csv или test.csv.gz
 destinations.csv или destinations.csv.gz
 ```
 
-При настроенном Kaggle API можно использовать:
-
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/download_data.ps1
+uv sync --group dev
+uv run expedia-recsys --threads 7 --memory-limit 32GB prepare
 ```
 
-## 3. Подготовка Parquet
+## Полная сборка витрин
+
+Для Dell Precision 7710 / 64 GB RAM:
 
 ```powershell
-uv run expedia-recsys --memory-limit 8GB prepare
+powershell -ExecutionPolicy Bypass -File .\scripts\run_product_analytics.ps1 `
+  -Threads 7 `
+  -MemoryLimit 32GB
 ```
 
-Результат:
+Либо по шагам:
+
+```powershell
+uv run expedia-analytics --threads 7 --memory-limit 32GB build
+uv run expedia-analytics validate
+uv run expedia-analytics inspect
+```
+
+## Результаты
 
 ```text
-data/processed/train.parquet
-data/processed/test.parquet
-data/processed/destinations.parquet
+data/analytics/expedia_analytics.duckdb
+data/marts/fct_hotel_interactions.parquet
+data/marts/fct_search_contexts.parquet
+data/marts/dim_*.parquet
+data/marts/dm_*.parquet
+artifacts/analytics/build_manifest.json
+artifacts/analytics/validation_report.json
 ```
 
-## 4. Временная валидация
+## Основные витрины
 
-По умолчанию история заканчивается 31 июля 2014 года, а validation начинается 1 августа 2014 года и содержит только бронирования.
+- `dm_product_daily`, `dm_product_monthly` — состояние продукта;
+- `dm_segment_daily`, `dm_segment_monthly` — device/package/traveller/lead-time/stay/distance/channel/site/lifecycle;
+- `dm_destination_performance`, `dm_destination_monthly` — спрос и booking rate направлений;
+- `dm_travel_patterns` — поведение по типам поездок;
+- `dm_user_profile`, `dm_user_cohort_monthly` — пользовательская активность и когорты;
+- `dm_data_quality_summary`, `dm_data_quality_daily` — качество данных.
+
+## Документация
+
+- `docs/marts_architecture.md` — архитектура, lineage и гранулярность;
+- `docs/metric_dictionary.md` — формулы и ограничения метрик;
+- SQL каждой таблицы находится в `sql/analytics/` и является исполняемой документацией.
+
+## Проверки
 
 ```powershell
-uv run expedia-recsys --memory-limit 8GB validate --cutoff 2014-08-01
-```
-
-Результат:
-
-```text
-artifacts/validation_metrics.json
-artifacts/validation_predictions.csv
-```
-
-Основная метрика — `map_at_5`. Для одной правильной метки в строке она совпадает со средним reciprocal rank правильного hotel cluster в топ-5.
-
-## 5. Submission
-
-```powershell
-uv run expedia-recsys --memory-limit 8GB submit
-```
-
-Результат:
-
-```text
-artifacts/submission_stage1.csv
-```
-
-## 6. Полный запуск
-
-```powershell
-uv run expedia-recsys --memory-limit 8GB all --cutoff 2014-08-01
-```
-
-Если в ноутбуке меньше 12–16 ГБ RAM, установите лимит `6GB`. DuckDB сможет использовать диск, но обработка займёт больше времени.
-
-## 7. Проверки
-
-```powershell
-uv run pytest
 uv run ruff check .
-uv run ruff format --check .
+uv run pytest
+uv run expedia-analytics validate
 ```
 
-## Что считается завершением этапа 1
-
-- исходные данные преобразуются одной командой;
-- validation не использует события из будущего;
-- получена зафиксированная MAP@5;
-- сформирован корректный CSV с пятью уникальными hotel cluster для каждой строки;
-- код проходит тесты и статический анализ.
+Сборка атомарная: рабочая DuckDB заменяется только после успешного создания всех витрин и прохождения quality gates.
