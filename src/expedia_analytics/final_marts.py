@@ -10,22 +10,28 @@ def _create_bounded_statistical_macros(con: Any) -> None:
     con.execute(
         """
         CREATE OR REPLACE MACRO wilson_low(successes, total) AS
-            CASE WHEN total > 0 THEN GREATEST(
-                0.0,
-                ((successes::DOUBLE / total) + 1.9208 / total
-                 - 1.96 * SQRT(
-                    ((successes::DOUBLE / total) * (1 - successes::DOUBLE / total)
-                     + 0.9604 / total) / total
-                 )) / (1 + 3.8416 / total)
+            CASE WHEN total > 0 THEN LEAST(
+                successes::DOUBLE / total,
+                GREATEST(
+                    0.0,
+                    ((successes::DOUBLE / total) + 1.9208 / total
+                     - 1.96 * SQRT(
+                        ((successes::DOUBLE / total) * (1 - successes::DOUBLE / total)
+                         + 0.9604 / total) / total
+                     )) / (1 + 3.8416 / total)
+                )
             ) ELSE NULL END;
         CREATE OR REPLACE MACRO wilson_high(successes, total) AS
-            CASE WHEN total > 0 THEN LEAST(
-                1.0,
-                ((successes::DOUBLE / total) + 1.9208 / total
-                 + 1.96 * SQRT(
-                    ((successes::DOUBLE / total) * (1 - successes::DOUBLE / total)
-                     + 0.9604 / total) / total
-                 )) / (1 + 3.8416 / total)
+            CASE WHEN total > 0 THEN GREATEST(
+                successes::DOUBLE / total,
+                LEAST(
+                    1.0,
+                    ((successes::DOUBLE / total) + 1.9208 / total
+                     + 1.96 * SQRT(
+                        ((successes::DOUBLE / total) * (1 - successes::DOUBLE / total)
+                         + 0.9604 / total) / total
+                     )) / (1 + 3.8416 / total)
+                )
             ) ELSE NULL END;
         """
     )
