@@ -7,6 +7,7 @@ from pathlib import Path
 from expedia_analytics.builder import build_analytics, inspect_analytics, validate_analytics
 from expedia_analytics.config import AnalyticsPaths, default_project_root
 from expedia_analytics.profiler import profile_sources
+from expedia_analytics.source_reconciliation import reconcile_sources
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -22,6 +23,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--memory-limit", default="32GB")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    subparsers.add_parser(
+        "reconcile-sources",
+        help="compare raw CSV rows and parse failures with prepared Parquet sources",
+    )
 
     profile = subparsers.add_parser(
         "profile",
@@ -42,7 +48,13 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _parser().parse_args()
     paths = AnalyticsPaths.from_root(args.root)
-    if args.command == "profile":
+    if args.command == "reconcile-sources":
+        reconcile_sources(
+            paths,
+            threads=args.threads,
+            memory_limit=args.memory_limit,
+        )
+    elif args.command == "profile":
         profile_sources(
             paths,
             threads=args.threads,
