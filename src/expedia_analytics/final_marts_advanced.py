@@ -12,8 +12,12 @@ def _create_advanced_marts(con: Any) -> None:
             FROM analytics.fct_user_day
             GROUP BY user_id
         ), user_month AS (
-            SELECT DISTINCT user_id, event_month AS activity_month
+            SELECT
+                user_id,
+                event_month AS activity_month,
+                BOOL_OR(has_booking) AS has_booking
             FROM analytics.fct_user_day
+            GROUP BY user_id, event_month
         ), cohort_size AS (
             SELECT first_observed_month, COUNT(*)::BIGINT AS cohort_users
             FROM first_seen
@@ -22,40 +26,61 @@ def _create_advanced_marts(con: Any) -> None:
             SELECT
                 f.first_observed_month,
                 u.activity_month,
-                DATE_DIFF('month', f.first_observed_month, u.activity_month)::INTEGER
-                    AS observed_age_month,
                 COUNT(DISTINCT u.user_id)::BIGINT AS observed_active_users,
-                COUNT(DISTINCT u.user_id) FILTER (
-                    WHERE EXISTS (
-                        SELECT 1 FROM analytics.fct_user_day d
-                        WHERE d.user_id = u.user_id
-                          AND d.event_month = u.activity_month
-                          AND d.has_booking
-                    )
-                )::BIGINT AS observed_booking_users
+                COUNT(DISTINCT u.user_id) FILTER (WHERE u.has_booking)::BIGINT
+                    AS observed_booking_users
             FROM user_month u
             JOIN first_seen f USING (user_id)
             GROUP BY f.first_observed_month, u.activity_month
         ), bounds AS (
-            SELECT MAX(event_month) AS max_observed_month FROM analytics.fct_user_day
+            SELECT
+                MIN(first_observed_month) AS min_cohort_month,
+                MAX(activity_month) AS max_observed_month,
+                DATE_DIFF(
+                    'month', MIN(first_observed_month), MAX(activity_month)
+                )::INTEGER AS global_max_observed_age
+            FROM first_seen
+            CROSS JOIN (SELECT MAX(event_month) AS activity_month FROM analytics.fct_user_day)
+        ), cohort_age_grid AS (
+            SELECT
+                c.first_observed_month,
+                age_value::INTEGER AS observed_age_month,
+                (c.first_observed_month + age_value * INTERVAL 1 MONTH)::DATE
+                    AS activity_month,
+                c.cohort_users,
+                b.max_observed_month,
+                (c.first_observed_month + age_value * INTERVAL 1 MONTH)::DATE
+                    > b.max_observed_month AS is_right_censored,
+                DATE_DIFF(
+                    'month', c.first_observed_month, b.max_observed_month
+                )::INTEGER AS observable_horizon_months
+            FROM cohort_size c
+            CROSS JOIN bounds b
+            CROSS JOIN GENERATE_SERIES(0, b.global_max_observed_age) AS ages(age_value)
         )
         SELECT
-            o.first_observed_month,
-            o.activity_month,
-            o.observed_age_month,
-            c.cohort_users,
-            o.observed_active_users,
-            safe_rate(o.observed_active_users, c.cohort_users) AS observed_recurrence_share,
-            o.observed_booking_users,
-            safe_rate(o.observed_booking_users, o.observed_active_users)
-                AS booking_user_share_among_observed_active,
-            DATE_DIFF('month', o.first_observed_month, b.max_observed_month)
-                < (SELECT MAX(observed_age_month) FROM observed) AS is_right_censored,
-            DATE_DIFF('month', o.first_observed_month, b.max_observed_month)
-                AS observable_horizon_months
-        FROM observed o
-        JOIN cohort_size c USING (first_observed_month)
-        CROSS JOIN bounds b;
+            g.first_observed_month,
+            g.activity_month,
+            g.observed_age_month,
+            g.cohort_users,
+            CASE WHEN g.is_right_censored THEN NULL
+                 ELSE COALESCE(o.observed_active_users, 0) END AS observed_active_users,
+            CASE WHEN g.is_right_censored THEN NULL
+                 ELSE safe_rate(COALESCE(o.observed_active_users, 0), g.cohort_users) END
+                AS observed_recurrence_share,
+            CASE WHEN g.is_right_censored THEN NULL
+                 ELSE COALESCE(o.observed_booking_users, 0) END AS observed_booking_users,
+            CASE WHEN g.is_right_censored THEN NULL
+                 ELSE safe_rate(
+                    COALESCE(o.observed_booking_users, 0),
+                    COALESCE(o.observed_active_users, 0)
+                 ) END AS booking_user_share_among_observed_active,
+            g.is_right_censored,
+            g.observable_horizon_months
+        FROM cohort_age_grid g
+        LEFT JOIN observed o
+          ON g.first_observed_month = o.first_observed_month
+         AND g.activity_month = o.activity_month;
         """
     )
     con.execute(
@@ -186,20 +211,24 @@ def _create_advanced_marts(con: Any) -> None:
                 ) AS population_share
             FROM analytics.dm_booking_population_drift
             GROUP BY dataset, dimension_name, dimension_value
+        ), train_share AS (
+            SELECT dimension_name, dimension_value, population_share
+            FROM aggregate_share
+            WHERE dataset = 'train_booking'
+        ), test_share AS (
+            SELECT dimension_name, dimension_value, population_share
+            FROM aggregate_share
+            WHERE dataset = 'test_booking'
         ), paired AS (
             SELECT
                 COALESCE(t.dimension_name, e.dimension_name) AS dimension_name,
                 COALESCE(t.dimension_value, e.dimension_value) AS dimension_value,
                 COALESCE(t.population_share, 0.0) AS train_share,
                 COALESCE(e.population_share, 0.0) AS test_share
-            FROM aggregate_share t
-            FULL OUTER JOIN aggregate_share e
+            FROM train_share t
+            FULL OUTER JOIN test_share e
               ON t.dimension_name = e.dimension_name
              AND t.dimension_value = e.dimension_value
-             AND t.dataset = 'train_booking'
-             AND e.dataset = 'test_booking'
-            WHERE COALESCE(t.dataset, 'train_booking') = 'train_booking'
-              AND COALESCE(e.dataset, 'test_booking') = 'test_booking'
         )
         SELECT
             dimension_name,
