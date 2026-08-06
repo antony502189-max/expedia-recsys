@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("duckdb")
+duckdb = pytest.importorskip("duckdb")
 
 from expedia_analytics.config import AnalyticsPaths
 from expedia_analytics.contracts import DESTINATION_COLUMNS, TEST_COLUMNS, TRAIN_COLUMNS
@@ -112,6 +112,12 @@ def _prepare_project(root: Path) -> AnalyticsPaths:
             srch_destination_id=1001,
             hotel_market=502,
         ),
+        _train_row(
+            date_time="2014-12-23 21:28:17",
+            user_id=13,
+            srch_ci="2558-03-15",
+            srch_co="2558-03-16",
+        ),
         _train_row(date_time="not-a-date", user_id=12),
     ]
     _write_csv(paths.raw_dir / "train.csv", [item.name for item in TRAIN_COLUMNS], train)
@@ -151,6 +157,40 @@ def test_final_build_reconciles_and_is_reproducible(tmp_path: Path) -> None:
     )
     assert first["quality"]["passed"]
     assert second["quality"]["passed"]
+
+    database = paths.analytics_dir / "synthetic-a" / "expedia_analytics.duckdb"
+    connection = duckdb.connect(str(database), read_only=True)
+    try:
+        anomaly = connection.execute(
+            """
+            SELECT trip_date_quality, is_plausible_lead_time, lead_time_segment
+            FROM analytics.fct_hotel_interactions
+            WHERE checkin_date = DATE '2558-03-15'
+            """
+        ).fetchone()
+        assert anomaly == ("lead_time_out_of_scope", False, "out_of_scope_gt_730")
+
+        maximum_date, calendar_days = connection.execute(
+            "SELECT MAX(date_day), COUNT(*) FROM analytics.dim_date"
+        ).fetchone()
+        assert maximum_date.year == 2014
+        assert calendar_days < 1000
+
+        quality_rows = connection.execute(
+            """
+            SELECT affected_rows
+            FROM analytics.dm_data_quality_summary
+            WHERE quality_rule = 'trip_date_quality:lead_time_out_of_scope'
+            """
+        ).fetchone()
+        assert quality_rows == (1,)
+
+        seasonality_rows = connection.execute(
+            "SELECT SUM(interaction_rows) FROM analytics.dm_checkin_seasonality"
+        ).fetchone()[0]
+        assert seasonality_rows == 4
+    finally:
+        connection.close()
 
     comparison = compare_builds(paths, "synthetic-a", "synthetic-b", exact=True)
     assert comparison["identical_logical_checksums"]
