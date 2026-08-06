@@ -17,7 +17,7 @@ class AnalyticsPaths:
     sql_dir: Path
 
     @classmethod
-    def from_root(cls, root: Path) -> "AnalyticsPaths":
+    def from_root(cls, root: Path) -> AnalyticsPaths:
         resolved = root.resolve()
         return cls(
             root=resolved,
