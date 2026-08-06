@@ -7,7 +7,8 @@ import shutil
 import sys
 import time
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,24 @@ from expedia_analytics.final_validation import (
 
 class BuildValidationError(RuntimeError):
     pass
+
+
+def _json_default(value: Any) -> str:
+    """Serialize non-primitive evidence emitted by DuckDB quality checks."""
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, (Path, Decimal)):
+        return str(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        indent=2,
+        default=_json_default,
+    )
 
 
 def _merge_quality_checks(
@@ -161,24 +180,22 @@ def build_final_analytics(
         "prohibited_claims": contract["prohibited_claims"],
     }
     (artifacts_work / "build_manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        _json_dumps(manifest), encoding="utf-8"
     )
     (artifacts_work / "validation_report.json").write_text(
-        json.dumps(quality, ensure_ascii=False, indent=2), encoding="utf-8"
+        _json_dumps(quality), encoding="utf-8"
     )
     (artifacts_work / "analytics_contract_snapshot.json").write_text(
-        json.dumps(contract, ensure_ascii=False, indent=2), encoding="utf-8"
+        _json_dumps(contract), encoding="utf-8"
     )
     (artifacts_work / "SUCCESS.json").write_text(
-        json.dumps(
+        _json_dumps(
             {
                 "build_id": build_id,
                 "schema_version": contract["schema_version"],
                 "quality_passed": True,
                 "database_sha256": database_sha256,
-            },
-            ensure_ascii=False,
-            indent=2,
+            }
         ),
         encoding="utf-8",
     )
