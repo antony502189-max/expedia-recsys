@@ -186,7 +186,15 @@ def test_final_build_reconciles_and_is_reproducible(tmp_path: Path) -> None:
         seasonality_rows = connection.execute(
             "SELECT SUM(interaction_rows) FROM analytics.dm_checkin_seasonality"
         ).fetchone()[0]
-        assert seasonality_rows == 4
+        plausible_trip_rows = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM analytics.fct_hotel_interactions
+            WHERE is_plausible_trip_dates
+            """
+        ).fetchone()[0]
+        assert plausible_trip_rows == 3
+        assert seasonality_rows == plausible_trip_rows
     finally:
         connection.close()
 
