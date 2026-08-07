@@ -229,16 +229,26 @@ def _create_advanced_marts(con: Any) -> None:
             FULL OUTER JOIN test_share e
               ON t.dimension_name = e.dimension_name
              AND t.dimension_value = e.dimension_value
+        ), deterministic_contributions AS (
+            SELECT
+                dimension_name,
+                CAST(
+                    ABS(test_share - train_share)
+                    AS DECIMAL(38, 15)
+                ) AS tvd_contribution,
+                CAST(
+                    (test_share - train_share)
+                    * LN((test_share + 1e-12) / (train_share + 1e-12))
+                    AS DECIMAL(38, 15)
+                ) AS psi_contribution
+            FROM paired
         )
         SELECT
             dimension_name,
-            0.5 * SUM(ABS(test_share - train_share)) AS total_variation_distance,
-            SUM(
-                (test_share - train_share)
-                * LN((test_share + 1e-12) / (train_share + 1e-12))
-            ) AS population_stability_index,
+            0.5 * CAST(SUM(tvd_contribution) AS DOUBLE) AS total_variation_distance,
+            CAST(SUM(psi_contribution) AS DOUBLE) AS population_stability_index,
             COUNT(*)::BIGINT AS compared_categories
-        FROM paired
+        FROM deterministic_contributions
         GROUP BY dimension_name;
         """
     )
