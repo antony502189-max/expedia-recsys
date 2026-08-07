@@ -149,7 +149,7 @@ def test_final_build_reconciles_and_is_reproducible(tmp_path: Path) -> None:
     )
     second = build_final_analytics(
         paths,
-        threads=1,
+        threads=4,
         memory_limit="1GB",
         build_id="synthetic-b",
     )
