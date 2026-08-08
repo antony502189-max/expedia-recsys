@@ -6,9 +6,10 @@ from pathlib import Path
 
 import duckdb
 
+from expedia_analytics.comparison import compare_builds
 from expedia_analytics.config import AnalyticsPaths
 from expedia_analytics.contracts import DESTINATION_COLUMNS, TEST_COLUMNS, TRAIN_COLUMNS
-from expedia_analytics.final_builder import build_final_analytics, compare_builds
+from expedia_analytics.final_builder import build_final_analytics
 
 
 def _write_csv(path: Path, columns: list[str], rows: list[dict[str, object]]) -> None:
@@ -201,6 +202,9 @@ def test_final_build_reconciles_and_is_reproducible(tmp_path: Path) -> None:
     comparison = compare_builds(paths, "synthetic-a", "synthetic-b", exact=True)
     assert comparison["identical_logical_checksums"]
     assert comparison["exact_identical"]
+    assert comparison["exact_method"] == (
+        "schema + equal row counts + one-direction EXCEPT ALL emptiness"
+    )
 
     pointer = json.loads(paths.latest_pointer_path.read_text(encoding="utf-8"))
     assert pointer["build_id"] == "synthetic-b"
