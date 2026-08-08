@@ -1,0 +1,53 @@
+name: Product analytics CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - feature/product-analytics
+
+permissions:
+  contents: read
+
+jobs:
+  validate-final-data-product:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: python -m pip install --disable-pip-version-check uv
+
+      - name: Sync locked environment
+        run: uv sync --frozen --group dev
+
+      - name: Ruff
+        run: uv run --frozen ruff check .
+
+      - name: Unit and synthetic integration tests
+        run: uv run --frozen pytest -q
+
+      - name: Verify lockfile remains unchanged
+        run: git diff --exit-code -- uv.lock
+
+      - name: Parse PowerShell launcher
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "scripts/run_product_analytics.ps1"),
+            [ref]$null,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
