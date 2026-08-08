@@ -4,12 +4,12 @@ import argparse
 import os
 from pathlib import Path
 
+from expedia_analytics.comparison import compare_builds
 from expedia_analytics.config import AnalyticsPaths, default_project_root
 from expedia_analytics.final_acceptance import evaluate_final_acceptance
 from expedia_analytics.final_builder import (
     _json_dumps,
     build_final_analytics,
-    compare_builds,
     inspect_latest,
     validate_latest,
 )
@@ -59,7 +59,7 @@ def _parser() -> argparse.ArgumentParser:
     compare.add_argument(
         "--exact",
         action="store_true",
-        help="also run exact EXCEPT ALL comparison across both DuckDB builds",
+        help="also prove exact multiset equality inside DuckDB",
     )
 
     acceptance = subparsers.add_parser(

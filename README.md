@@ -1,21 +1,35 @@
 # Expedia Product Analytics — обработанные данные и аналитические витрины
 
-Эта ветка реализует только первый итоговый артефакт проекта: воспроизводимый слой
-обработанных данных и BI-ready витрины. Рекомендательные модели, Kaggle submissions и MAP@5
-не входят в scope.
+Первый итоговый артефакт проекта завершён: репозиторий содержит воспроизводимый слой обработанных данных и BI-ready витрин для дальнейшего дашборда и аналитических выводов.
+
+## Статус
+
+**Stage 1: COMPLETE**
+
+Проверенная полная сборка:
+
+- build A: `20260807T103804Z`;
+- build B: `20260807T121247Z`;
+- full-data reconciliation: PASS;
+- manual verification: PASS;
+- exact reproducibility audit: **43/43 base-table objects identical**;
+- final acceptance: **YES**.
+
+PR с реализацией Stage 1: `#2 Product analytics: final processed-data product and analytical marts`.
 
 ## Корректная интерпретация
 
-Competition-датасет содержит зарегистрированные click/booking-взаимодействия, но не все поиски,
-показы, сессии, шаги оформления, оплаты и отмены. Основной публикуемый outcome:
+Competition-датасет содержит зарегистрированные click/booking-взаимодействия, но не все поиски, показы, сессии, шаги оформления, оплаты и отмены.
+
+Основной публикуемый outcome:
 
 ```text
 booking_interaction_share = booking_rows / logged_interaction_rows
 ```
 
-Это характеристика предоставленной исторической выборки, а не полная продуктовая воронка и не
-Expedia-wide KPI. Отдельно публикуется secondary sensitivity metric для детерминированных
-proxy-контекстов идентифицированных пользователей.
+Это характеристика предоставленной исторической competition-выборки, а не полная продуктовая воронка и не Expedia-wide KPI. Дополнительные user/proxy metrics публикуются только с явным denominator и coverage.
+
+Запрещённые трактовки: search-to-booking conversion, checkout conversion, retention, churn, revenue, GMV и causal uplift без отдельного источника данных/эксперимента.
 
 ## Финальная архитектура
 
@@ -28,31 +42,73 @@ data/raw/destinations.csv[.gz]
   -> interaction, identified proxy-context and user-day facts
   -> date, origin, destination and segment dimensions
   -> destination-market bridge
-  -> dashboard/analysis marts
+  -> BI-safe dashboard/analysis marts
   -> immutable DuckDB + versioned Parquet + validation manifest
 ```
 
 Реализованы:
 
-- length-prefixed SHA-256 fingerprints и учёт multiplicity точных дубликатов;
-- равенство `raw = accepted + quarantine`;
+- length-prefixed SHA-256 fingerprints и multiplicity-aware reconciliation точных дубликатов;
+- гарантия `raw = accepted + quarantine` для каждого источника;
 - content-multiset reconciliation;
-- отдельная семантика физической строки, `cnt`, proxy-контекста и user-day;
-- Wilson confidence intervals и support labels;
+- отдельная семантика physical row, `cnt`, proxy-context и user-day;
+- уникальные grain keys для опубликованных объектов;
+- additive numerators/denominators в rate marts;
+- Wilson confidence intervals и statistical support для sparse breakdowns;
 - missingness drift, proxy ambiguity и train/test booking-population drift;
-- immutable build directories, rollback pointer и SHA-256 каждого Parquet;
-- логические checksums и точное `EXCEPT ALL` сравнение двух сборок;
-- автоматические quality gates и отдельный бинарный acceptance evaluator.
+- immutable build directories и атомарный `LATEST_BUILD.json`;
+- SHA-256 исходников, контракта, lockfile, базы и Parquet-файлов;
+- logical checksums и exact multiset comparison между независимыми сборками;
+- автоматические quality gates и бинарный final acceptance evaluator.
+
+## Основные слои
+
+### Landing / staging
+
+- `raw.*_landing` — исходные строки без потери значений;
+- `staging.stg_*_accepted` — типизированные записи;
+- `staging.quarantine_*` — отклонённые записи с raw values и reject reasons;
+- reconciliation metadata — доказательство сохранности содержимого.
+
+### Core
+
+- `analytics.fct_hotel_interactions` — одно зарегистрированное click/booking interaction;
+- `analytics.fct_proxy_search_contexts` — детерминированный request-like proxy только для identified users;
+- `analytics.fct_user_day` — user × observed event day.
+
+### Dimensions / bridge
+
+- `dim_date`;
+- `dim_origin`;
+- `dim_destination`;
+- `dim_segment_definition`;
+- `bridge_destination_hotel_market`.
+
+### BI marts
+
+Витрины покрывают:
+
+- sample activity daily/monthly;
+- interaction outcomes daily/monthly;
+- proxy-context outcomes daily/monthly;
+- identified user-day outcomes daily/monthly;
+- long-format segments daily/monthly;
+- destinations, hotel markets и origin→destination routes;
+- travel patterns, check-in seasonality и booking window;
+- observed recurrence с right-censoring;
+- missingness, proxy ambiguity, booking-population drift и data quality.
+
+Подробные grain и семантика: `docs/marts_architecture.md`, `docs/data_dictionary.md`, `docs/metric_dictionary.md`.
 
 ## Установка
 
-Нужны Python 3.11+, `uv` и три исходных файла в `data/raw`.
+Нужны Python 3.11+, `uv` и исходные Expedia-файлы в `data/raw`.
 
 ```powershell
-uv sync --group dev
+uv sync --frozen --group dev
 ```
 
-## Полная сборка на проектном ноутбуке
+## Полная сборка
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File ".\scripts\run_product_analytics.ps1" `
@@ -60,31 +116,43 @@ powershell -ExecutionPolicy Bypass -File ".\scripts\run_product_analytics.ps1" `
   -MemoryLimit "32GB"
 ```
 
-Скрипт запускает Ruff, тесты, опциональную сверку legacy-Parquet, source profile, immutable build,
-повторную validation и печать registry.
-
-## Команды
+Либо напрямую:
 
 ```powershell
-uv run expedia-analytics --threads 7 --memory-limit 32GB build-final
-uv run expedia-analytics validate-final
-uv run expedia-analytics inspect-final
-uv run expedia-analytics compare-builds <left_build_id> <right_build_id> --exact
+uv run --frozen expedia-analytics --threads 7 --memory-limit 32GB build-final
+uv run --frozen expedia-analytics validate-final
+uv run --frozen expedia-analytics inspect-final
 ```
 
-Финальный бинарный вердикт после двух чистых сборок и ручной сверки:
+## Reproducibility
+
+Для двух независимых build ID:
+
+```powershell
+uv run --frozen expedia-analytics compare-builds <left_build_id> <right_build_id> --exact
+```
+
+Exact mode сначала проверяет schema/row-count consistency, затем для каждой опубликованной таблицы доказывает multiset equality через `EXCEPT ALL` без материализации различий в Python.
+
+## Final acceptance
 
 ```powershell
 Copy-Item config\manual_verification.example.json artifacts\analytics\manual_verification.json
-# заполнить JSON после проверки контрольных строк и итоговых чисел
-uv run expedia-analytics acceptance-status `
+# заполнить JSON после проверки representative rows, headline totals и quarantine
+
+uv run --frozen expedia-analytics acceptance-status `
   <left_build_id> `
   <right_build_id> `
   --manual-verification artifacts\analytics\manual_verification.json
 ```
 
-Команда возвращает только `YES` после прохождения всех машинных и ручных критериев. В остальных
-случаях она возвращает `NO` и закрытый список непройденных checks.
+Авторитетный результат сохраняется в:
+
+```text
+artifacts/analytics/FINAL_ACCEPTANCE.json
+```
+
+Для принятой Stage 1 сборки получен `verdict = YES`.
 
 ## Физические результаты
 
@@ -99,28 +167,22 @@ data/analytics/LATEST_BUILD.json
 artifacts/analytics/FINAL_ACCEPTANCE.json
 ```
 
-## Blocking quality contract
+Большие generated DB/Parquet-файлы не хранятся в Git. В Git находится код, контракт, SQL, тесты и документация; готовые витрины передаются команде отдельным data handoff.
 
-Build публикуется только после выполнения всех проверок, включая:
+## Quality contract
 
-- raw rows равны accepted плюс quarantine;
-- raw и output multisets совпадают по fingerprint и multiplicity;
-- все grain keys уникальны;
-- факты и витрины сходятся по числителям и знаменателям;
-- daily и monthly totals совпадают;
-- каждый segment type независимо сходится с общей популяцией;
-- rate лежат в `[0, 1]`, а числители не превышают знаменатели;
-- Wilson intervals корректны;
-- календарь непрерывен;
-- right-censored recurrence cells не заполняются выдуманными нулями;
-- quarantine и proxy ambiguity не превышают контрактные пороги;
-- опубликованные имена не создают ложных продуктовых трактовок.
+Build публикуется только если выполняются blocking checks, включая:
 
-## Статус
+- source completeness и content reconciliation;
+- grain uniqueness;
+- fact/mart reconciliation;
+- daily ↔ monthly consistency;
+- reconciliation каждого segment family;
+- rates в `[0, 1]` и numerator ≤ denominator;
+- корректные Wilson intervals;
+- continuous date spine;
+- корректное right-censoring;
+- quarantine/proxy ambiguity thresholds;
+- отсутствие запрещённых продуктовых терминов в published contract.
 
-Кодовая реализация финального контракта находится в ветке. Артефакт остаётся draft до полного
-прогона на 37,6 млн строк, второго чистого прогона, точного сравнения двух DuckDB и ручной проверки.
-После этого единственным авторитетным ответом является поле `verdict` в
-`artifacts/analytics/FINAL_ACCEPTANCE.json`.
-
-Подробности: `docs/final_data_product.md` и `docs/third_red_team_audit.md`.
+История требований и закрытие red-team blockers: `docs/third_red_team_audit.md`.

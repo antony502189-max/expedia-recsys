@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from expedia_analytics.comparison import compare_builds
 from expedia_analytics.config import AnalyticsPaths
-from expedia_analytics.final_builder import _json_dumps, compare_builds
+from expedia_analytics.final_builder import _json_dumps
 from expedia_analytics.final_common import _load_contract
 
 
@@ -51,7 +52,9 @@ def _manual_verification(
             }
         )
         return None, checks
-    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    # utf-8-sig accepts both plain UTF-8 and Windows-created UTF-8 files with BOM.
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     checks.extend(
         [
             {

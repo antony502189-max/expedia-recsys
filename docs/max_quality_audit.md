@@ -1,28 +1,46 @@
-# Maximum-quality audit: processed data and analytical marts
+# Maximum-quality audit — historical closure note
 
 ## Status
 
-The initial implementation is a prototype and must not be presented as the final first project artifact.
+This document records the pre-acceptance audit phase of Stage 1. The original prototype findings have been closed by the final implementation and the authoritative third red-team acceptance contract.
 
-Three successive red-team reviews were performed. The authoritative, closed acceptance contract is now:
+**Current verdict: YES.**
+
+Authoritative closure report:
 
 ```text
 docs/third_red_team_audit.md
 ```
 
-That document supersedes any earlier open-ended list. It defines:
+Accepted evidence:
 
-- the semantic boundary of the competition sample;
-- allowed and prohibited metric interpretations;
-- the final logical architecture;
-- source, staging and quarantine requirements;
-- statistical and BI delivery requirements;
-- a binary 10/10 acceptance matrix.
+- two independent full-data builds;
+- full source/staging/quarantine reconciliation;
+- all blocking quality gates passed;
+- exact reproducibility audit: 43/43 base-table objects identical;
+- manual verification passed;
+- final acceptance: `YES` with zero failures.
 
-## Current binary verdict
+## What this audit contributed
 
-**NO.**
+The earlier audit cycle established the requirements that the final implementation now enforces:
 
-The project becomes a defensible 10/10 first artifact only after every gate in the third-audit acceptance matrix passes on the complete local dataset.
+- explicit semantic scope for the competition sample;
+- prohibition of unsupported conversion/retention/revenue claims;
+- lossless raw landing and quarantine;
+- multiplicity-aware content reconciliation;
+- unique grains and additive rate components;
+- many-to-many destination/market modeling;
+- composite origin geography;
+- missingness/ambiguity/drift diagnostics;
+- statistical uncertainty/support;
+- immutable versioned physical delivery;
+- reproducibility and manual acceptance gates.
 
-The remaining uncertainty is empirical rather than conceptual: source distributions, full-run SQL behavior, determinism, end-to-end tests and manual reconciliation must still be verified.
+For current architecture, use:
+
+- `docs/final_data_product.md`;
+- `docs/marts_architecture.md`;
+- `docs/data_dictionary.md`;
+- `docs/metric_dictionary.md`;
+- `docs/third_red_team_audit.md`.

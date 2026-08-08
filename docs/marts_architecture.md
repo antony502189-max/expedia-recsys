@@ -1,89 +1,164 @@
 # Архитектура обработанных данных и витрин
 
-> Статус: архитектурный прототип. Перед финальной сборкой необходимо закрыть обязательные замечания из [`max_quality_audit.md`](max_quality_audit.md). Текущие таблицы нельзя представлять как окончательный слой данных до полного прогона на 37+ млн строк и прохождения расширенных quality gates.
+> Статус: **FINAL / ACCEPTED**. Stage 1 прошёл полный data-run, quality gates, две независимые сборки, exact reproducibility audit и manual verification. Final acceptance: `YES`.
 
 ## Цель слоя данных
 
-Слой данных превращает 37+ млн агрегированных логов Expedia в воспроизводимую аналитическую модель, пригодную для дашборда и продуктовых выводов. Сборка выполняется DuckDB без загрузки полного датасета в pandas.
+Слой данных превращает историческую Expedia competition-выборку в воспроизводимую аналитическую модель, пригодную для BI-дашборда и продуктовых выводов без повторной агрегации десятков миллионов строк в BI-инструменте.
 
 ```text
 Kaggle CSV
-  -> data/processed/*.parquet
-  -> analytics.fct_hotel_interactions
-  -> analytics.fct_search_contexts
-  -> analytics.dim_*
-  -> analytics.dm_*
-  -> data/marts/*.parquet
-  -> data/analytics/expedia_analytics.duckdb
+  -> raw string landing
+  -> typed accepted staging + quarantine
+  -> analytical facts
+  -> dimensions + bridge
+  -> BI-safe marts
+  -> immutable versioned DuckDB + Parquet
 ```
 
-## Две факт-таблицы
+## Landing и staging
+
+Каждая исходная строка сохраняется в raw landing и затем попадает ровно в одну из двух веток:
+
+```text
+raw row
+  -> accepted staging
+  -> quarantine + reject reasons
+```
+
+Контракт требует:
+
+```text
+raw = accepted + quarantine
+```
+
+Кроме арифметики строк выполняется content-multiset reconciliation по каноническим fingerprint с multiplicity.
+
+## Core facts
 
 ### `fct_hotel_interactions`
 
-Гранулярность: одна строка исходного `train.csv`. Поле `cnt` — количество похожих событий в контексте той же пользовательской сессии. До финальной версии raw `cnt`, валидный similar-event count и физическое число строк должны трактоваться раздельно.
+Гранулярность: одно принятое зарегистрированное click/booking interaction.
 
-### `fct_search_contexts`
+Это не search и не session. Исходный `cnt` и физическая строка хранят раздельную семантику.
 
-В источнике нет `session_id` и `search_request_id`. Детерминированный `search_context_key` строится из пользователя, времени, параметров поездки, устройства, канала и направления. Это proxy поискового контекста, а не доказанная сессия.
+Большой fact экспортируется partitioned по году/месяцу.
 
-Временная чувствительная метрика:
+### `fct_proxy_search_contexts`
 
-```text
-booking_bearing_proxy_context_share = proxy contexts с хотя бы одним booking / все proxy contexts
-```
+Гранулярность: один детерминированный request-like proxy для identified user.
 
-Она не является полной checkout-конверсией: в датасете отсутствуют показы, реальный session id и шаги оформления. Основной наблюдаемый outcome должен рассчитываться также непосредственно на interaction-row grain.
+Источник не содержит настоящего `session_id`/`search_request_id`, поэтому proxy metrics всегда публикуются как sensitivity layer, а не как полноценная воронка.
 
-## Витрины прототипа
+### `fct_user_day`
 
-| Витрина | Гранулярность | Назначение |
+Гранулярность: `user_id × event_date`.
+
+Используется для identified-user activity и booking-user metrics с явным coverage.
+
+## Dimensions и bridge
+
+| Объект | Grain | Назначение |
 |---|---|---|
-| `dm_product_daily` | дата | Ежедневное состояние продукта |
-| `dm_product_monthly` | месяц | Месячная динамика |
-| `dm_segment_daily` | дата × тип сегмента × значение | Основные продуктовые разрезы |
-| `dm_segment_monthly` | месяц × тип сегмента × значение | Быстрые месячные BI-запросы |
-| `dm_destination_performance` | направление | Спрос, booking rate, opportunity quadrant |
-| `dm_destination_monthly` | месяц × направление | Сезонность направлений |
-| `dm_travel_patterns` | месяц × travel-сегменты | Поведение по типу поездки |
-| `dm_user_profile` | пользователь | Частота, бронирования и lifecycle |
-| `dm_user_cohort_monthly` | cohort × activity month | Когортная активность |
-| `dm_data_quality_summary` | правило качества | Полный DQ-отчёт |
-| `dm_data_quality_daily` | дата | Качество во времени |
+| `dim_date` | date | continuous observed date spine |
+| `dim_origin` | composite origin id | анонимизированная country/region/city иерархия |
+| `dim_destination` | destination id | latent features `d1-d149` и покрытие |
+| `dim_segment_definition` | segment type × value | стабильные BI labels и sort order |
+| `bridge_destination_hotel_market` | destination × hotel market | явная many-to-many связь |
 
-Окончательный состав и семантика определены в `max_quality_audit.md` и будут расширены специализированными outcome-, channel-, market-, route-, seasonality- и retention-витринами.
+## Published marts
 
-## Сегментация
+### Product / sample dynamics
 
-- устройство: mobile / desktop / unknown;
-- пакет: package / standalone / unknown;
-- путешественник: solo / couple / family / group / unknown;
-- lead time: same day, 1–7, 8–30, 31–90, 91–180, 181+;
-- stay: 1, 2–3, 4–7, 8–14, 15+ ночей;
-- distance: интервалы исходного поля только на hotel-interaction grain; контекстный `ANY_VALUE(distance)` запрещён;
-- lifecycle: new / returning / unknown относительно первого наблюдаемого события.
+| Mart | Grain | Назначение |
+|---|---|---|
+| `dm_sample_activity_daily` | day | daily sample coverage/activity |
+| `dm_sample_activity_monthly` | month | monthly sample coverage/activity |
+| `dm_interaction_outcome_daily` | day | booking share among logged interactions |
+| `dm_interaction_outcome_monthly` | month | monthly interaction outcome |
+| `dm_proxy_context_daily` | day | proxy-context sensitivity + coverage |
+| `dm_proxy_context_monthly` | month | monthly proxy-context sensitivity |
+| `dm_user_day_daily` | day | identified-user activity/outcome |
+| `dm_user_day_monthly` | month | monthly identified-user outcome |
 
-Границы сегментов должны быть подтверждены source profile и устойчивостью размера групп, а не только экспертно заданы.
+### Segments
 
-## Воспроизводимость
+| Mart | Grain | Назначение |
+|---|---|---|
+| `dm_segment_daily` | day × segment type × value | BI-safe daily breakdowns |
+| `dm_segment_monthly` | month × segment type × value | BI-safe monthly breakdowns |
 
-Финальная сборка должна:
+Published segment families include device, package, traveller, lead-time, stay, channel/site and other contract-defined categories. Rate marts carry additive numerators and denominators.
 
-- создавать новую DuckDB во временном файле и заменять рабочую только после quality gates;
-- писать весь набор Parquet в неизменяемую директорию конкретного build ID;
-- обновлять `LATEST_BUILD.json` только после успешного завершения;
-- сохранять предыдущий успешный build для rollback;
-- сохранять SQL SHA-256, row count, grain uniqueness, диапазон дат, размер файла и время расчёта;
-- сохранять версии Python/DuckDB, Git commit, source schema и source metadata;
-- не удалять raw и processed данные.
+### Destination / market / routes
 
-## Физические артефакты
+| Mart | Grain | Назначение |
+|---|---|---|
+| `dm_destination_performance` | destination | destination outcomes + Wilson uncertainty |
+| `dm_destination_monthly` | month × destination | destination dynamics |
+| `dm_hotel_market_performance` | hotel market | market outcomes + uncertainty |
+| `dm_origin_destination_routes` | origin × destination | observed anonymized route demand/outcome |
+
+### Travel behavior
+
+| Mart | Grain | Назначение |
+|---|---|---|
+| `dm_travel_patterns` | month × traveller × lead-time × stay | multi-dimensional travel patterns |
+| `dm_checkin_seasonality` | check-in month × traveller | seasonality |
+| `dm_booking_window` | lead-time × stay | planning horizon / stay-length outcome |
+
+### Observability / recurrence
+
+| Mart | Grain | Назначение |
+|---|---|---|
+| `dm_observed_recurrence` | first observed month × activity month | observed recurrence with right-censoring |
+
+Название intentional: это не registration-based retention и не churn model.
+
+### Data quality / drift
+
+| Mart | Grain | Назначение |
+|---|---|---|
+| `dm_missingness_daily` | day × field | missingness/validity drift |
+| `dm_proxy_context_ambiguity` | ambiguity type | proxy coverage/ambiguity |
+| `dm_booking_population_drift` | dataset × month × dimension × value | train-booking vs test-booking population drift |
+| `dm_booking_population_drift_summary` | dimension | distribution drift summary |
+| `dm_data_quality_summary` | quality rule | source/staging/semantic DQ summary |
+
+## BI contract
+
+Для rate-витрин BI должен агрегировать числитель и знаменатель, а затем пересчитывать rate:
 
 ```text
-data/analytics/expedia_analytics.duckdb
-data/marts/<build_id>/*.parquet
-data/marts/LATEST_BUILD.json
-artifacts/analytics/build_manifest.json
-artifacts/analytics/validation_report.json
-artifacts/analytics/source_profile.json
+rate = SUM(numerator) / SUM(denominator)
 ```
+
+Нельзя усреднять уже рассчитанные проценты между группами с разным объёмом.
+
+Для sparse destination/market/booking-window breakdowns публикуются Wilson confidence intervals и support metadata.
+
+## Physical design
+
+Большие row-level факты partitioned по event year/month. Компактные агрегированные marts экспортируются отдельными Parquet-файлами с ZSTD compression.
+
+Каждый успешный build имеет immutable директории:
+
+```text
+data/analytics/<build_id>/expedia_analytics.duckdb
+data/marts/<build_id>/...
+artifacts/analytics/<build_id>/build_manifest.json
+artifacts/analytics/<build_id>/validation_report.json
+artifacts/analytics/<build_id>/analytics_contract_snapshot.json
+artifacts/analytics/<build_id>/SUCCESS.json
+```
+
+`LATEST_BUILD.json` обновляется атомарно только после прохождения quality gates. Предыдущие успешные build остаются доступны для rollback/audit.
+
+## Reproducibility evidence
+
+Для принятого Stage 1 выполнены две независимые полные сборки:
+
+- `20260807T103804Z`;
+- `20260807T121247Z`.
+
+Отдельный exact audit подтвердил равенство **43/43 base-table objects**. Final manual verification также пройдена; итоговый acceptance: `YES`.
