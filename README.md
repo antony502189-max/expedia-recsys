@@ -1,5 +1,7 @@
 # Expedia Product Analytics
 
+[![Product analytics CI](https://github.com/antony502189-max/expedia-recsys/actions/workflows/product-analytics-ci.yml/badge.svg?branch=main)](https://github.com/antony502189-max/expedia-recsys/actions/workflows/product-analytics-ci.yml)
+
 A reproducible DuckDB analytics pipeline for the Expedia Hotel Recommendations competition data. It turns the supplied logged interactions into validated analytical marts, then produces a separate, dashboard-oriented BI layer without modifying the accepted source build.
 
 > The dataset contains logged click/booking interactions, not a complete Expedia funnel. `booking_interaction_share` is therefore a descriptive share of logged interactions—not a search-to-booking conversion rate, revenue metric, or causal product KPI.
@@ -133,6 +135,12 @@ The supplied data does not include complete searches, impressions, checkout step
 - sparse entities must be interpreted with support levels and confidence intervals.
 
 See the [data dictionary](docs/data_dictionary.md), [metric dictionary](docs/metric_dictionary.md), [quality rules](docs/data_quality_rules.md), and [BI mart guide](docs/bi_dashboard_marts.md) for detailed definitions.
+
+## Documentation
+
+- **Stage 1:** [architecture](docs/marts_architecture.md), [quality rules](docs/data_quality_rules.md), and [final data product](docs/final_data_product.md).
+- **Stage 2:** [dashboard specification](docs/stage2_dashboard_spec.md), [KPI dictionary](docs/stage2_kpi_dictionary.md), and [final BI audit](docs/stage2_final_bi_audit.md).
+- **Stage 3:** [analytical summary](docs/stage3/analytical_summary.md), [evidence register](docs/stage3/evidence_register.md), and [acceptance checklist](docs/stage3/acceptance_checklist.md).
 
 ## Generated Artifacts
 
