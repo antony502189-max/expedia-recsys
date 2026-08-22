@@ -142,6 +142,22 @@ See the [data dictionary](docs/data_dictionary.md), [metric dictionary](docs/met
 - **Stage 2:** [dashboard specification](docs/stage2_dashboard_spec.md), [KPI dictionary](docs/stage2_kpi_dictionary.md), and [final BI audit](docs/stage2_final_bi_audit.md).
 - **Stage 3:** [analytical summary](docs/stage3/analytical_summary.md), [evidence register](docs/stage3/evidence_register.md), and [acceptance checklist](docs/stage3/acceptance_checklist.md).
 
+## Presentation Narrative: From Raw Data to Product Decisions
+
+The project presentation follows one disciplined thread: use the historical sample to identify **where to investigate**, then use prospective experiments to establish **what causes improvement**.
+
+| Chapter | What the audience learns |
+|---|---|
+| **1. Understand the evidence** | The anonymized 2013–2014 sample contains 37.7M logged hotel interactions, not a complete search, payment, or cancellation funnel. |
+| **2. Trust the data product** | Raw CSV files are preserved, validated, typed, reconciled, and transformed into analytical and dashboard-ready marts. |
+| **3. See the opportunity areas** | Activity grew faster than the observed booking-interaction share; mobile, package, group-planning, long-horizon, and high-volume destination contexts deserve deeper investigation. |
+| **4. Turn observations into hypotheses** | Candidate improvements include clearer package terms, transparent mobile results, group-fit and total-price cues, destination-aware ranking, and planning support for complex trips. |
+| **5. Prove impact correctly** | A/B tests—not before/after comparisons—should measure one change at a time with a pre-registered primary metric, guardrails, duration, and decision rule. |
+
+The first proposed experiments focus on package clarity and mobile-result transparency. Larger destination, family/group, and long-planning opportunities remain evidence-backed candidates until tested.
+
+> Historical analytics identifies associations and prioritizes questions. Causal impact requires prospective instrumentation and a controlled experiment.
+
 ## Generated Artifacts
 
 Large local artifacts are intentionally excluded from Git:
