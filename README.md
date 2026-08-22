@@ -1,122 +1,94 @@
-# Expedia Product Analytics — обработанные данные и аналитические витрины
+# Expedia Product Analytics
 
-Первый итоговый артефакт проекта завершён: репозиторий содержит воспроизводимый слой обработанных данных и BI-ready витрин для дальнейшего дашборда и аналитических выводов.
+A reproducible DuckDB analytics pipeline for the Expedia Hotel Recommendations competition data. It turns the supplied logged interactions into validated analytical marts, then produces a separate, dashboard-oriented BI layer without modifying the accepted source build.
 
-## Статус
+> The dataset contains logged click/booking interactions, not a complete Expedia funnel. `booking_interaction_share` is therefore a descriptive share of logged interactions—not a search-to-booking conversion rate, revenue metric, or causal product KPI.
 
-**Stage 1: COMPLETE**
+## Overview
 
-Проверенная полная сборка:
+The project is designed for reliable exploratory product analytics on a large, anonymized historical dataset. Its two core stages are deliberately separated:
 
-- build A: `20260807T103804Z`;
-- build B: `20260807T121247Z`;
-- full-data reconciliation: PASS;
-- manual verification: PASS;
-- exact reproducibility audit: **43/43 base-table objects identical**;
-- final acceptance: **YES**.
+1. **Stage 1 — analytical data product:** raw landing, typed staging, row-preserving quarantine, facts, dimensions, analytical marts, and acceptance checks.
+2. **Stage 2 — dashboard BI layer:** narrow Parquet exports, canonical field names, dashboard specifications, and independent reconciliation back to the accepted Stage 1 build.
 
-PR с реализацией Stage 1: `#2 Product analytics: final processed-data product and analytical marts`.
+The pipeline preserves source lineage, checks grain and rate invariants, and records generated artifacts outside Git.
 
-## Корректная интерпретация
+## Features
 
-Competition-датасет содержит зарегистрированные click/booking-взаимодействия, но не все поиски, показы, сессии, шаги оформления, оплаты и отмены.
+- DuckDB-based, reproducible build of analytical facts, dimensions, and marts.
+- Source-content reconciliation and row-preserving quarantine for invalid records.
+- Grain, uniqueness, range, daily/monthly, and numerator/denominator quality gates.
+- Wilson confidence intervals and support levels for sparse entity comparisons.
+- Explicit handling of proxy contexts, observed recurrence, missingness, and booking-population drift.
+- Immutable, versioned build directories with manifests, hashes, and exact build comparison.
+- Dashboard-ready Parquet marts with source reconciliation and delivery-package validation.
 
-Основной публикуемый outcome:
+## Architecture
 
-```text
-booking_interaction_share = booking_rows / logged_interaction_rows
+```mermaid
+flowchart LR
+    Raw[Raw Expedia CSV files] --> Landing[Raw landing]
+    Landing --> Staging[Accepted staging + quarantine]
+    Staging --> Facts[Interaction and proxy-context facts]
+    Facts --> Marts[Stage 1 analytical marts]
+    Marts --> Acceptance[Validation and acceptance]
+    Acceptance --> BI[Stage 2 BI Parquet marts]
+    BI --> Dashboard[Dashboard delivery package]
 ```
 
-Это характеристика предоставленной исторической competition-выборки, а не полная продуктовая воронка и не Expedia-wide KPI. Дополнительные user/proxy metrics публикуются только с явным denominator и coverage.
+## Tech Stack
 
-Запрещённые трактовки: search-to-booking conversion, checkout conversion, retention, churn, revenue, GMV и causal uplift без отдельного источника данных/эксперимента.
+| Layer | Technology |
+|---|---|
+| Language | Python 3.11+ |
+| Analytics engine | DuckDB |
+| Packaging | `uv` and Hatchling |
+| Data formats | CSV, DuckDB, Parquet, JSON |
+| Testing and linting | pytest and Ruff |
+| CI | GitHub Actions |
 
-## Финальная архитектура
+## Project Structure
 
 ```text
-data/raw/train.csv[.gz]
-data/raw/test.csv[.gz]
-data/raw/destinations.csv[.gz]
-  -> raw string landing
-  -> accepted typed staging + row-preserving quarantine
-  -> interaction, identified proxy-context and user-day facts
-  -> date, origin, destination and segment dimensions
-  -> destination-market bridge
-  -> BI-safe dashboard/analysis marts
-  -> immutable DuckDB + versioned Parquet + validation manifest
+config/                    Data and acceptance contracts
+docs/                      Data dictionary, quality rules, BI specifications
+scripts/                   Build, validation, export, and delivery commands
+sql/analytics/             Stage 1 analytical mart SQL
+src/expedia_analytics/     Analytics pipeline and Stage 2 BI builder
+src/expedia_recsys/        Original recommendation-system utilities
+tests/                     Unit and synthetic integration tests
+data/                      Local source data and generated builds (ignored)
+artifacts/                 Local manifests and validation evidence (ignored)
+deliverables/              Local dashboard packages (ignored)
 ```
 
-Реализованы:
+## Getting Started
 
-- length-prefixed SHA-256 fingerprints и multiplicity-aware reconciliation точных дубликатов;
-- гарантия `raw = accepted + quarantine` для каждого источника;
-- content-multiset reconciliation;
-- отдельная семантика physical row, `cnt`, proxy-context и user-day;
-- уникальные grain keys для опубликованных объектов;
-- additive numerators/denominators в rate marts;
-- Wilson confidence intervals и statistical support для sparse breakdowns;
-- missingness drift, proxy ambiguity и train/test booking-population drift;
-- immutable build directories и атомарный `LATEST_BUILD.json`;
-- SHA-256 исходников, контракта, lockfile, базы и Parquet-файлов;
-- logical checksums и exact multiset comparison между независимыми сборками;
-- автоматические quality gates и бинарный final acceptance evaluator.
+### Prerequisites
 
-## Основные слои
+- Python 3.11 or later
+- [uv](https://docs.astral.sh/uv/)
+- The Expedia source files in `data/raw/` for a full Stage 1 build:
+  - `train.csv` or `train.csv.gz`
+  - `test.csv` or `test.csv.gz`
+  - `destinations.csv` or `destinations.csv.gz`
 
-### Landing / staging
-
-- `raw.*_landing` — исходные строки без потери значений;
-- `staging.stg_*_accepted` — типизированные записи;
-- `staging.quarantine_*` — отклонённые записи с raw values и reject reasons;
-- reconciliation metadata — доказательство сохранности содержимого.
-
-### Core
-
-- `analytics.fct_hotel_interactions` — одно зарегистрированное click/booking interaction;
-- `analytics.fct_proxy_search_contexts` — детерминированный request-like proxy только для identified users;
-- `analytics.fct_user_day` — user × observed event day.
-
-### Dimensions / bridge
-
-- `dim_date`;
-- `dim_origin`;
-- `dim_destination`;
-- `dim_segment_definition`;
-- `bridge_destination_hotel_market`.
-
-### BI marts
-
-Витрины покрывают:
-
-- sample activity daily/monthly;
-- interaction outcomes daily/monthly;
-- proxy-context outcomes daily/monthly;
-- identified user-day outcomes daily/monthly;
-- long-format segments daily/monthly;
-- destinations, hotel markets и origin→destination routes;
-- travel patterns, check-in seasonality и booking window;
-- observed recurrence с right-censoring;
-- missingness, proxy ambiguity, booking-population drift и data quality.
-
-Подробные grain и семантика: `docs/marts_architecture.md`, `docs/data_dictionary.md`, `docs/metric_dictionary.md`.
-
-## Установка
-
-Нужны Python 3.11+, `uv` и исходные Expedia-файлы в `data/raw`.
+### Install
 
 ```powershell
 uv sync --frozen --group dev
 ```
 
-## Полная сборка
+### Run checks
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File ".\scripts\run_product_analytics.ps1" `
-  -Threads 7 `
-  -MemoryLimit "32GB"
+uv run --frozen ruff check .
+uv run --frozen pytest -q
 ```
 
-Либо напрямую:
+### Build and validate Stage 1
+
+Use resource values appropriate for the local machine:
 
 ```powershell
 uv run --frozen expedia-analytics --threads 7 --memory-limit 32GB build-final
@@ -124,65 +96,62 @@ uv run --frozen expedia-analytics validate-final
 uv run --frozen expedia-analytics inspect-final
 ```
 
-## Reproducibility
-
-Для двух независимых build ID:
+The PowerShell launcher offers the same workflow:
 
 ```powershell
-uv run --frozen expedia-analytics compare-builds <left_build_id> <right_build_id> --exact
+powershell -ExecutionPolicy Bypass -File .\scripts\run_product_analytics.ps1 -Threads 7 -MemoryLimit 32GB
 ```
 
-Exact mode сначала проверяет schema/row-count consistency, затем для каждой опубликованной таблицы доказывает multiset equality через `EXCEPT ALL` без материализации различий в Python.
+### Build and validate Stage 2 BI marts
 
-## Final acceptance
+Stage 2 reads the accepted Stage 1 build in read-only mode and writes separate BI exports under `data/bi/<build-id>/`.
 
 ```powershell
-Copy-Item config\manual_verification.example.json artifacts\analytics\manual_verification.json
-# заполнить JSON после проверки representative rows, headline totals и quarantine
-
-uv run --frozen expedia-analytics acceptance-status `
-  <left_build_id> `
-  <right_build_id> `
-  --manual-verification artifacts\analytics\manual_verification.json
+uv run --frozen python scripts/build_bi_layer.py
+uv run --frozen python scripts/validate_bi_layer.py
+uv run --frozen python scripts/audit_stage2_bi_delivery.py
+uv run --frozen python scripts/package_stage2_bi_delivery.py
+uv run --frozen python scripts/package_stage2_bi_delivery.py --verify
 ```
 
-Авторитетный результат сохраняется в:
+Use `--replace` with the build command only when intentionally regenerating an existing BI export.
+
+## Quality and Semantics
+
+The main outcome is:
 
 ```text
-artifacts/analytics/FINAL_ACCEPTANCE.json
+booking_interaction_share = booking_rows / logged_interaction_rows
 ```
 
-Для принятой Stage 1 сборки получен `verdict = YES`.
+The supplied data does not include complete searches, impressions, checkout steps, payments, cancellations, revenue, or the full Expedia traffic population. Accordingly:
 
-## Физические результаты
+- proxy contexts are not real sessions;
+- observed recurrence is not retention;
+- destination and hotel-market entities remain distinct;
+- observed segment differences are associations, not causal effects;
+- sparse entities must be interpreted with support levels and confidence intervals.
 
-```text
-data/analytics/<build_id>/expedia_analytics.duckdb
-data/marts/<build_id>/...
-artifacts/analytics/<build_id>/build_manifest.json
-artifacts/analytics/<build_id>/validation_report.json
-artifacts/analytics/<build_id>/analytics_contract_snapshot.json
-artifacts/analytics/<build_id>/SUCCESS.json
-data/analytics/LATEST_BUILD.json
-artifacts/analytics/FINAL_ACCEPTANCE.json
-```
+See the [data dictionary](docs/data_dictionary.md), [metric dictionary](docs/metric_dictionary.md), [quality rules](docs/data_quality_rules.md), and [BI mart guide](docs/bi_dashboard_marts.md) for detailed definitions.
 
-Большие generated DB/Parquet-файлы не хранятся в Git. В Git находится код, контракт, SQL, тесты и документация; готовые витрины передаются команде отдельным data handoff.
+## Generated Artifacts
 
-## Quality contract
+Large local artifacts are intentionally excluded from Git:
 
-Build публикуется только если выполняются blocking checks, включая:
+- source datasets and processed outputs under `data/`;
+- analytics manifests and acceptance evidence under `artifacts/`;
+- BI delivery exports under `data/bi/` and `deliverables/`.
 
-- source completeness и content reconciliation;
-- grain uniqueness;
-- fact/mart reconciliation;
-- daily ↔ monthly consistency;
-- reconciliation каждого segment family;
-- rates в `[0, 1]` и numerator ≤ denominator;
-- корректные Wilson intervals;
-- continuous date spine;
-- корректное right-censoring;
-- quarantine/proxy ambiguity thresholds;
-- отсутствие запрещённых продуктовых терминов в published contract.
+This keeps the repository reproducible without committing large datasets or generated packages.
 
-История требований и закрытие red-team blockers: `docs/third_red_team_audit.md`.
+## Configuration
+
+The project has no runtime environment variables or committed credentials. Build behavior is defined by the checked-in analytics contracts in `config/`.
+
+## Contributing
+
+Create a focused branch, keep generated data out of commits, run Ruff and pytest, and ensure any change to data semantics is reflected in the relevant contract and documentation.
+
+## License
+
+No license file is currently included. Do not assume reuse rights beyond those granted by the repository owner and the source dataset terms.

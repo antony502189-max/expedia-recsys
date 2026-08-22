@@ -5,6 +5,17 @@ __pycache__/
 *.py[cod]
 *.duckdb
 *.duckdb.wal
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+node_modules/
+build/
+dist/
 
 data/raw/*
 !data/raw/.gitkeep
@@ -14,5 +25,8 @@ data/analytics/*
 !data/analytics/.gitkeep
 data/marts/*
 !data/marts/.gitkeep
+data/bi/
 artifacts/*
 !artifacts/.gitkeep
+deliverables/
+team_handoff_stage1/
